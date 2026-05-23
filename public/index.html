@@ -1,11 +1,11 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Compilador visual</title>
-    <link rel="stylesheet" href="styles.css?v=20260522-3">
+    <link rel="stylesheet" href="styles.css?v=20260523-6">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
         rel="stylesheet">
@@ -32,58 +32,55 @@
                 <!-- stdin removido, ahora es interactivo -->
                 <div class="btn-group">
                     <input type="file" id="file-upload" accept=".txt,.c" style="display: none;">
-                    <button id="btn-load" class="btn-secondary" title="Cargar código fuente">📂 Cargar</button>
-                    <button id="btn-clean" class="btn-secondary" title="Limpiar todo">🧹 Limpiar</button>
+                    <button id="btn-load" class="btn-secondary" title="Cargar codigo fuente">Cargar</button>
+                    <button id="btn-clean" class="btn-secondary" title="Limpiar todo">Limpiar</button>
                 </div>
-                <button id="btn-save" class="btn-secondary full-width" title="Guardar resultados de compilación">💾 Guardar Datos</button>
+                <button id="btn-save" class="btn-secondary full-width" title="Guardar codigo fuente">Guardar Codigo</button>
             </div>
 
             <div class="toolbar-title">Diagramas de Flujo</div>
             <div class="toolbar" id="toolbox">
                 <div class="tool-btn" draggable="true" data-type="start">
-                    <span class="icon">🟢</span> Inicio/Fin
+                    <span class="icon"></span> Inicio/Fin
                 </div>
                 <div class="tool-btn" draggable="true" data-type="assign">
-                    <span class="icon">🟦</span> Asignación
+                    <span class="icon"></span> Asignacion
                 </div>
                 <div class="tool-btn" draggable="true" data-type="if">
-                    <span class="icon">🔶</span> Decisión (Si)
+                    <span class="icon"></span> Decision (Si)
                 </div>
                 <div class="tool-btn" draggable="true" data-type="while">
-                    <span class="icon">🔄</span> Bucle (Mientras)
+                    <span class="icon"></span> Bucle (Mientras)
                 </div>
                 <div class="tool-btn" draggable="true" data-type="for">
-                    <span class="icon">🔃</span> Bucle (Para)
+                    <span class="icon"></span> Bucle (Para)
                 </div>
                 <div class="tool-btn" draggable="true" data-type="print">
-                    <span class="icon">📤</span> Salida (Imprimir)
+                    <span class="icon"></span> Salida (Imprimir)
                 </div>
                 <div class="tool-btn" draggable="true" data-type="input">
-                    <span class="icon">📥</span> Entrada (Leer)
-                </div>
-                <div class="tool-btn" draggable="true" data-type="else">
-                    <span class="icon">🔀</span> Si No (Else)
+                    <span class="icon"></span> Entrada (Leer)
                 </div>
                 <div class="tool-btn" draggable="true" data-type="end">
-                    <span class="icon">🛑</span> Fin Bloque
+                    <span class="icon"></span> Fin Bloque
                 </div>
             </div>
 
-            <button id="btn-compile" class="btn-compile">🚀 Compilar y Ejecutar</button>
+            <button id="btn-compile" class="btn-compile">Compilar y Ejecutar</button>
         </aside>
 
-        <!-- Panel Central: Código/Visual -->
+        <!-- Panel Central: Codigo/Visual -->
         <main class="editor-panel">
             <div class="panel-header">
                 <div class="view-tabs">
                     <button class="view-btn active" data-view="visual">Diagrama de Flujo</button>
-                    <button class="view-btn" data-view="code">Código Fuente</button>
+                    <button class="view-btn" data-view="code">Codigo Fuente</button>
                 </div>
                 <div class="zoom-controls">
-                    <button id="zoom-out" title="Alejar">➖</button>
+                    <button id="zoom-out" title="Alejar">-</button>
                     <span id="zoom-level">100%</span>
-                    <button id="zoom-in" title="Acercar">➕</button>
-                    <button id="zoom-reset" title="Restablecer">🔄</button>
+                    <button id="zoom-in" title="Acercar">+</button>
+                    <button id="zoom-reset" title="Restablecer">Reset</button>
                 </div>
                 <div class="status-indicator" id="compile-status">Listo</div>
             </div>
@@ -91,7 +88,7 @@
             <div id="visual-view" class="view-pane active">
                 <div class="canvas-wrapper" id="canvas-wrapper">
                     <div class="flowchart-canvas" id="canvas">
-                        <div class="empty-msg">Arrastra bloques aquí para armar tu programa...</div>
+                        <div class="empty-msg">Arrastra bloques aqui para armar tu programa...</div>
                     </div>
                 </div>
             </div>
@@ -110,11 +107,11 @@
             </div>
             
             <div id="interactive-terminal" class="interactive-terminal">
-                <div class="term-header">📟 Terminal Interactiva (NASM)</div>
-                <div class="term-output" id="term-output">Esperando compilación y ejecución...</div>
+                <div class="term-header">Terminal Interactiva (NASM)</div>
+                <div class="term-output" id="term-output">Esperando compilacion y ejecucion...</div>
                 <div class="term-input-row" id="term-input-row" style="display: none;">
                     <span class="prompt">&gt;</span>
-                    <input type="text" id="term-input" autocomplete="off" placeholder="Escribe aquí y presiona Enter...">
+                    <input type="text" id="term-input" autocomplete="off" placeholder="Escribe aqui y presiona Enter...">
                 </div>
             </div>
         </main>
@@ -128,31 +125,31 @@
                 <button class="tab-btn" data-target="tab-rust">Rust</button>
                 <button class="tab-btn" data-target="tab-ast">AST</button>
                 <button class="tab-btn" data-target="tab-tokens">Tokens</button>
-                <button class="tab-btn" data-target="tab-sym">Símbolos</button>
+                <button class="tab-btn" data-target="tab-sym">Simbolos</button>
                 <button class="tab-btn" data-target="tab-echo">ECHO (Log)</button>
             </div>
 
             <div class="tab-content">
                 <div id="tab-asm" class="tab-pane active">
-                    <pre><code id="out-asm">Esperando compilación...</code></pre>
+                    <pre><code id="out-asm">Esperando compilacion...</code></pre>
                 </div>
                 <div id="tab-ruby" class="tab-pane">
-                    <pre><code id="out-ruby">Esperando compilación...</code></pre>
+                    <pre><code id="out-ruby">Esperando compilacion...</code></pre>
                 </div>
                 <div id="tab-py" class="tab-pane">
-                    <pre><code id="out-py">Esperando compilación...</code></pre>
+                    <pre><code id="out-py">Esperando compilacion...</code></pre>
                 </div>
                 <div id="tab-rust" class="tab-pane">
-                    <pre><code id="out-rust">Esperando compilación...</code></pre>
+                    <pre><code id="out-rust">Esperando compilacion...</code></pre>
                 </div>
                 <div id="tab-ast" class="tab-pane">
-                    <pre><code id="out-ast">Esperando compilación...</code></pre>
+                    <pre><code id="out-ast">Esperando compilacion...</code></pre>
                 </div>
                 <div id="tab-tokens" class="tab-pane">
-                    <div id="out-tokens" class="table-container">Esperando compilación...</div>
+                    <div id="out-tokens" class="table-container">Esperando compilacion...</div>
                 </div>
                 <div id="tab-sym" class="tab-pane">
-                    <div id="out-sym" class="table-container">Esperando compilación...</div>
+                    <div id="out-sym" class="table-container">Esperando compilacion...</div>
                 </div>
                 <div id="tab-echo" class="tab-pane">
                     <pre><code id="out-echo" class="echo-log">Esperando compilacion...</code></pre>
@@ -161,7 +158,7 @@
         </aside>
     </div>
 
-    <script src="app.js?v=20260522-7"></script>
+    <script src="app.js?v=20260523-6"></script>
 </body>
 
 </html>

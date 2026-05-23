@@ -155,7 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
         editor.value = 'int main() {\n    \n    return 0;\n}';
         updateLineNumbers();
         canvas.innerHTML = '<div class="empty-msg">Arrastra bloques aquí para armar tu programa...</div>';
-        document.querySelectorAll('.tab-pane pre code, .table-container').forEach(el => el.innerHTML = 'Esperando compilación...');
+        document.querySelectorAll('.tab-pane pre code, .table-container').forEach(el => el.innerHTML = 'Esperando compilacion...');
         statusInd.textContent = 'Listo';
         statusInd.className = 'status-indicator';
         document.getElementById('out-filename').value = '';
@@ -277,18 +277,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
     canvas.addEventListener('drop', (e) => {
         e.preventDefault();
+        e.stopPropagation();
         canvas.style.background = 'rgba(0, 0, 0, 0.2)';
+        addDraggedBlockTo(canvas);
+    });
+
+    function addDraggedBlockTo(target) {
         if (!draggedType) return;
-
-        const emptyMsg = canvas.querySelector('.empty-msg');
+        const emptyMsg = target.querySelector(':scope > .empty-msg, :scope > .zone-empty');
         if (emptyMsg) emptyMsg.remove();
-
         const block = createBlock(draggedType);
-        canvas.appendChild(block);
+        target.appendChild(block);
         draggedType = null;
         resizeCanvasToContent();
         generateCodeFromCanvas();
-    });
+    }
+
+    function setupDropZone(zone) {
+        zone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            zone.classList.add('drag-over');
+        });
+        zone.addEventListener('dragleave', (e) => {
+            e.stopPropagation();
+            zone.classList.remove('drag-over');
+        });
+        zone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            zone.classList.remove('drag-over');
+            addDraggedBlockTo(zone);
+        });
+    }
 
     function createBlock(type) {
         const block = document.createElement('div');
@@ -321,24 +342,55 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'if':
                 title = 'if';
                 bodyHTML = `
-                    <div class="block-body">
-                        <input type="text" class="block-input" placeholder="A>B" name="cond">
+                    <div class="structured-flow if-flow">
+                        <div class="decision-node">
+                            <input type="text" class="block-input decision-input" placeholder="condicion" name="cond">
+                        </div>
+                        <div class="branch-row">
+                            <div class="branch-panel true-panel">
+                                <div class="branch-title">Verdadero</div>
+                                <div class="nested-zone" data-zone="true"><div class="zone-empty">Arrastra aqui bloque de instruccion</div></div>
+                            </div>
+                            <div class="branch-panel false-panel">
+                                <div class="branch-title">Falso</div>
+                                <div class="nested-zone" data-zone="false"><div class="zone-empty">Arrastra aqui bloque de instruccion</div></div>
+                            </div>
+                        </div>
+                        <div class="merge-node"></div>
                     </div>`;
                 break;
             case 'while':
                 title = 'while';
                 bodyHTML = `
-                    <div class="block-body">
-                        <input type="text" class="block-input" placeholder="N<10" name="cond">
+                    <div class="structured-flow loop-flow while-flow">
+                        <div class="decision-node">
+                            <input type="text" class="block-input decision-input" placeholder="contador <= 5" name="cond">
+                        </div>
+                        <div class="loop-label true">Verdadero</div>
+                        <div class="loop-label false">Falso</div>
+                        <div class="nested-zone loop-body" data-zone="body"><div class="zone-empty">Arrastra aqui bloque de instruccion</div></div>
+                        <div class="loop-return"></div>
+                        <div class="loop-exit"></div>
                     </div>`;
                 break;
             case 'for':
                 title = 'for';
                 bodyHTML = `
-                    <div class="block-body" style="display:flex; flex-direction:column; gap:4px;">
-                        <div>Init: <input type="text" class="block-input" placeholder="int i = 0" name="init"></div>
-                        <div>Cond: <input type="text" class="block-input" placeholder="i < 10" name="cond"></div>
-                        <div>Inc: <input type="text" class="block-input" placeholder="i++" name="inc"></div>
+                    <div class="structured-flow loop-flow for-flow">
+                        <div class="for-config">
+                            <input type="text" class="block-input" placeholder="int i = 0" name="init">
+                        </div>
+                        <div class="decision-node">
+                            <input type="text" class="block-input decision-input" placeholder="i <= 10" name="cond">
+                        </div>
+                        <div class="loop-label true">Verdadero</div>
+                        <div class="loop-label false">Falso</div>
+                        <div class="nested-zone loop-body" data-zone="body"><div class="zone-empty">Arrastra aqui bloque de instruccion</div></div>
+                        <div class="for-increment">
+                            <input type="text" class="block-input" placeholder="i++" name="inc">
+                        </div>
+                        <div class="loop-return"></div>
+                        <div class="loop-exit"></div>
                     </div>`;
                 break;
             case 'print':
@@ -385,19 +437,29 @@ document.addEventListener('DOMContentLoaded', () => {
             input.addEventListener('input', generateCodeFromCanvas);
         });
 
+        block.querySelectorAll('.nested-zone').forEach(setupDropZone);
+
         return block;
     }
 
     function generateCodeFromCanvas() {
         let code = '#include <stdio.h>\nint main() {\n';
-        let indent = '    ';
-        let openBlocks = [];
+        code += blocksToCode(canvas, '    ');
+        code += '    return 0;\n}';
+        editor.value = code;
+        updateLineNumbers();
+    }
 
-        document.querySelectorAll('.flow-block').forEach(block => {
+    function directBlocks(container) {
+        return [...container.children].filter(el => el.classList?.contains('flow-block'));
+    }
+
+    function blocksToCode(container, indent) {
+        let code = '';
+        directBlocks(container).forEach(block => {
             const type = block.dataset.type;
             
             if (type === 'start') {
-                // Ignore start block for code gen inside main
                 return;
             }
 
@@ -418,51 +480,30 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (type === 'if') {
                 const cond = block.querySelector('[name="cond"]').value || '1';
                 code += `${indent}if (${cond}) {\n`;
-                openBlocks.push('if');
-                indent += '    ';
+                code += blocksToCode(block.querySelector('[data-zone="true"]'), indent + '    ');
+                const falseZone = block.querySelector('[data-zone="false"]');
+                if (directBlocks(falseZone).length > 0) {
+                    code += `${indent}} else {\n`;
+                    code += blocksToCode(falseZone, indent + '    ');
+                }
+                code += `${indent}}\n`;
             }
             else if (type === 'while') {
                 const cond = block.querySelector('[name="cond"]').value || '1';
                 code += `${indent}while (${cond}) {\n`;
-                openBlocks.push('while');
-                indent += '    ';
+                code += blocksToCode(block.querySelector('[data-zone="body"]'), indent + '    ');
+                code += `${indent}}\n`;
             }
             else if (type === 'for') {
                 const init = block.querySelector('[name="init"]').value || 'int i = 0';
                 const cond = block.querySelector('[name="cond"]').value || 'i < 1';
                 const inc = block.querySelector('[name="inc"]').value || 'i++';
                 code += `${indent}for (${init}; ${cond}; ${inc}) {\n`;
-                openBlocks.push('for');
-                indent += '    ';
-            }
-            else if (type === 'else') {
-                if (openBlocks.length > 0 && openBlocks[openBlocks.length - 1] === 'if') {
-                    indent = indent.slice(0, -4);
-                    code += `${indent}} else {\n`;
-                    indent += '    ';
-                    openBlocks[openBlocks.length - 1] = 'else';
-                }
-            }
-            else if (type === 'end') {
-                if (openBlocks.length > 0) {
-                    indent = indent.slice(0, -4);
-                    code += `${indent}}\n`;
-                    openBlocks.pop();
-                }
+                code += blocksToCode(block.querySelector('[data-zone="body"]'), indent + '    ');
+                code += `${indent}}\n`;
             }
         });
-
-        // Close any open blocks (simplification: visual blocks apply sequentially for this demo)
-        // In a real flowchart, IFs would have "true/false" branches. For now we auto-close blocks at the end.
-        while (openBlocks.length > 0) {
-            indent = indent.slice(0, -4);
-            code += `${indent}}\n`;
-            openBlocks.pop();
-        }
-
-        code += '    return 0;\n}';
-        editor.value = code;
-        updateLineNumbers();
+        return code;
     }
 
     function generateCanvasFromCode() {
@@ -472,30 +513,51 @@ document.addEventListener('DOMContentLoaded', () => {
         
         let body = mainMatch[1];
         
-        // Limpiar canvas
         canvas.innerHTML = '';
         canvas.appendChild(createBlock('start'));
-        
-        // Regex simplificado para las lineas
+
         const lines = body.split('\n').map(l => l.trim()).filter(l => l);
+        const stack = [{ container: canvas, type: 'root' }];
+
+        const currentContainer = () => stack[stack.length - 1].container;
+        const appendBlock = (block, container = currentContainer()) => {
+            const empty = container.querySelector(':scope > .zone-empty, :scope > .empty-msg');
+            if (empty) empty.remove();
+            container.appendChild(block);
+        };
         
         for (let i = 0; i < lines.length; i++) {
             let line = lines[i];
-            if (line === '}' || line === '') continue;
+
+            if (line.startsWith('} else')) {
+                const current = stack[stack.length - 1];
+                if (current?.type === 'if') {
+                    current.container = current.block.querySelector('[data-zone="false"]');
+                    stack[stack.length - 1] = current;
+                }
+                continue;
+            }
+
+            if (line === '}' || line === '') {
+                if (stack.length > 1) stack.pop();
+                continue;
+            }
             
             if (line.startsWith('if')) {
                 const match = line.match(/if\s*\((.*?)\)/);
                 if (match) {
                     const block = createBlock('if');
                     block.querySelector('[name="cond"]').value = match[1];
-                    canvas.appendChild(block);
+                    appendBlock(block);
+                    stack.push({ type: 'if', block, container: block.querySelector('[data-zone="true"]') });
                 }
             } else if (line.startsWith('while')) {
                 const match = line.match(/while\s*\((.*?)\)/);
                 if (match) {
                     const block = createBlock('while');
                     block.querySelector('[name="cond"]').value = match[1];
-                    canvas.appendChild(block);
+                    appendBlock(block);
+                    stack.push({ type: 'while', block, container: block.querySelector('[data-zone="body"]') });
                 }
             } else if (line.startsWith('for')) {
                 const match = line.match(/for\s*\((.*?);(.*?);(.*?)\)/);
@@ -504,24 +566,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     block.querySelector('[name="init"]').value = match[1].trim();
                     block.querySelector('[name="cond"]').value = match[2].trim();
                     block.querySelector('[name="inc"]').value = match[3].trim();
-                    canvas.appendChild(block);
+                    appendBlock(block);
+                    stack.push({ type: 'for', block, container: block.querySelector('[data-zone="body"]') });
                 }
             } else if (line.startsWith('println') || line.startsWith('print') || line.startsWith('printf')) {
                 const match = line.match(/(println|print|printf)\s*\((.*?)\)/);
                 if (match) {
                     const block = createBlock('print');
                     block.querySelector('[name="val"]').value = match[2];
-                    canvas.appendChild(block);
+                    appendBlock(block);
                 }
             } else if (line.startsWith('scanf')) {
                 const match = line.match(/scanf\s*\(\s*".*?"\s*,\s*(.*?)\)/);
                 if (match) {
                     const block = createBlock('input');
                     block.querySelector('[name="var"]').value = match[1];
-                    canvas.appendChild(block);
+                    appendBlock(block);
                 }
             } else {
-                // Asignacion
+                const declarationMatch = line.match(/^(int|float|string)\s+([a-zA-Z_]\w*)\s*;$/);
+                if (declarationMatch) {
+                    const block = createBlock('assign');
+                    block.querySelector('[name="tipo"]').value = declarationMatch[1];
+                    block.querySelector('[name="var"]').value = declarationMatch[2];
+                    block.querySelector('[name="exp"]').value = declarationMatch[1] === 'float' ? '0.0' : (declarationMatch[1] === 'string' ? '""' : '0');
+                    appendBlock(block);
+                    continue;
+                }
                 const assignMatch = line.match(/^(?:(int|float|string)\s+)?([a-zA-Z_]\w*)\s*=\s*(.*?);$/);
                 if (assignMatch) {
                     const block = createBlock('assign');
@@ -529,10 +600,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     else block.querySelector('[name="tipo"]').value = '';
                     block.querySelector('[name="var"]').value = assignMatch[2];
                     block.querySelector('[name="exp"]').value = assignMatch[3];
-                    canvas.appendChild(block);
+                    appendBlock(block);
                 }
             }
         }
+        canvas.appendChild(createBlock('end'));
         resizeCanvasToContent();
     }
 
@@ -551,7 +623,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const code = editor.value;
         if (!code.trim()) return;
         
-        compileBtn.innerHTML = '⏳ Compilando...';
+        compileBtn.innerHTML = 'Compilando...';
         compileBtn.disabled = true;
         statusInd.textContent = 'Compilando...';
         statusInd.className = 'status-indicator';
@@ -569,7 +641,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
             
             if (result.ok) {
-                statusInd.textContent = 'Éxito';
+                statusInd.textContent = 'Exito';
                 statusInd.className = 'status-indicator success';
             } else {
                 statusInd.textContent = 'Errores';
@@ -578,9 +650,9 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Populate results
             document.getElementById('out-asm').textContent = result.asm || 'Sin salida NASM';
-            document.getElementById('out-ruby').textContent = result.ruby || 'Sin traducción a Ruby';
-            document.getElementById('out-py').textContent = result.python || 'Sin traducción a Python';
-            document.getElementById('out-rust').textContent = result.rust || 'Sin traducción a Rust';
+            document.getElementById('out-ruby').textContent = result.ruby || 'Sin traduccion a Ruby';
+            document.getElementById('out-py').textContent = result.python || 'Sin traduccion a Python';
+            document.getElementById('out-rust').textContent = result.rust || 'Sin traduccion a Rust';
             
             if (result.ast_json) {
                 document.getElementById('out-ast').textContent = JSON.stringify(result.ast_json, null, 2);
@@ -626,7 +698,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 result._tablaStr = tablaStr;
                 */
             } else {
-                document.getElementById('out-sym').innerHTML = 'Error al generar Tabla de Símbolos';
+                document.getElementById('out-sym').innerHTML = 'Error al generar Tabla de Simbolos';
             }
 
             let echoLog = buildCompilationLog(result);
@@ -656,7 +728,7 @@ document.addEventListener('DOMContentLoaded', () => {
             statusInd.className = 'status-indicator error';
             document.getElementById('out-echo').textContent = 'Error: ' + error.message;
         } finally {
-            compileBtn.innerHTML = '🚀 Compilar y Ejecutar';
+            compileBtn.innerHTML = 'Compilar y Ejecutar';
             compileBtn.disabled = false;
         }
     });

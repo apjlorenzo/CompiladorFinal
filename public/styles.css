@@ -1,4 +1,4 @@
-:root {
+﻿:root {
     --bg-base: #0f172a;
     --bg-surface: rgba(30, 41, 59, 0.7);
     --bg-surface-hover: rgba(51, 65, 85, 0.8);
@@ -330,14 +330,16 @@ body {
 }
 
 .flow-block:not(:last-child)::after {
-    content: "↓";
+    content: "";
     position: absolute;
     bottom: -2.5rem;
     left: 50%;
     transform: translateX(-50%);
-    font-size: 1.8rem;
-    color: var(--accent);
-    font-weight: bold;
+    width: 0;
+    height: 0;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 12px solid var(--accent);
     z-index: 10;
 }
 
@@ -376,34 +378,33 @@ body {
 }
 
 .flow-block.if .shape-bg {
-    /* Rombo (Diamond) */
-    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
-    background: rgba(245, 158, 11, 0.4);
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.72);
+    border: 2px solid rgba(245, 158, 11, 0.8);
 }
 .flow-block.if {
-    padding: 3.5rem 2rem;
-    min-width: 320px;
+    padding: 1.25rem 1.5rem;
+    min-width: 460px;
 }
 
 .flow-block.while .shape-bg {
-    /* Hexagon */
-    clip-path: polygon(15% 0%, 85% 0%, 100% 50%, 85% 100%, 15% 100%, 0% 50%);
-    background: rgba(139, 92, 246, 0.4);
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.72);
+    border: 2px solid rgba(139, 92, 246, 0.85);
 }
 .flow-block.while {
-    padding: 2.5rem 3rem;
-    min-width: 340px;
+    padding: 1.25rem 1.5rem;
+    min-width: 520px;
 }
 
 .flow-block.for .shape-bg {
-    /* Circle/Ellipse for FOR loop */
-    border-radius: 50px;
-    background: rgba(234, 179, 8, 0.4);
-    border: 2px solid #eab308;
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.72);
+    border: 2px solid rgba(234, 179, 8, 0.85);
 }
 .flow-block.for {
-    padding: 2.5rem 3rem;
-    min-width: 340px;
+    padding: 1.25rem 1.5rem;
+    min-width: 560px;
 }
 
 .flow-block.print .shape-bg,
@@ -470,6 +471,282 @@ body {
     flex: 0.3;
 }
 
+/* Flow structures: clean structured diagrams */
+.flow-block.if,
+.flow-block.while,
+.flow-block.for {
+    width: 620px;
+    min-width: 620px;
+    padding: 1.25rem 1.5rem 1.5rem;
+}
+
+.flow-block.if .shape-bg,
+.flow-block.while .shape-bg,
+.flow-block.for .shape-bg {
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.96);
+    border: 2px solid rgba(129, 140, 248, 0.9);
+}
+
+.structured-flow {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    position: relative;
+}
+
+.structured-flow .decision-node {
+    width: 230px;
+    height: 120px;
+    position: relative;
+    display: grid;
+    place-items: center;
+}
+
+.structured-flow .decision-node::before {
+    content: "";
+    position: absolute;
+    width: 150px;
+    height: 150px;
+    background: #1f2a3d;
+    border: 2px solid #facc15;
+    transform: rotate(45deg);
+}
+
+.structured-flow .decision-input {
+    position: relative;
+    z-index: 2;
+    width: 120px;
+    min-width: 120px;
+    text-align: center;
+    background: #0b1220;
+    border: 1px solid #334155;
+    font-size: 0.78rem;
+}
+
+.branch-row {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2.5rem;
+    position: relative;
+    margin-top: 0.55rem;
+}
+
+.branch-row::before {
+    content: "";
+    position: absolute;
+    top: -1.25rem;
+    left: 25%;
+    right: 25%;
+    border-top: 2px solid #cbd5e1;
+}
+
+.branch-panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.branch-panel::before {
+    content: "";
+    position: absolute;
+    top: -1.25rem;
+    left: 50%;
+    height: 1.25rem;
+    border-left: 2px solid #cbd5e1;
+}
+
+.branch-panel::after,
+.loop-body::after,
+.merge-node::after,
+.for-config::after,
+.for-increment::before {
+    content: "";
+    position: absolute;
+}
+
+.branch-panel::after {
+    top: -0.12rem;
+    left: calc(50% - 6px);
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid #cbd5e1;
+}
+
+.branch-title,
+.loop-label {
+    align-self: center;
+    min-width: 96px;
+    min-height: 24px;
+    display: grid;
+    place-items: center;
+    padding: 0 0.6rem;
+    border-radius: 999px;
+    background: #0b1220;
+    border: 1px solid #64748b;
+    color: #e2e8f0;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.true-panel .branch-title,
+.loop-label.true {
+    color: #bbf7d0;
+    border-color: #22c55e;
+}
+
+.false-panel .branch-title,
+.loop-label.false {
+    color: #fecaca;
+    border-color: #ef4444;
+}
+
+.nested-zone {
+    width: 100%;
+    min-height: 110px;
+    padding: 0.8rem;
+    border: 1.5px dashed #64748b;
+    border-radius: 8px;
+    background: rgba(2, 6, 23, 0.48);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.35rem;
+}
+
+.nested-zone.drag-over {
+    border-color: #22c55e;
+    background: rgba(34, 197, 94, 0.16);
+}
+
+.zone-empty {
+    min-height: 54px;
+    display: grid;
+    place-items: center;
+    color: #cbd5e1;
+    font-size: 0.76rem;
+    font-style: italic;
+    text-align: center;
+}
+
+.merge-node {
+    width: 2px;
+    height: 28px;
+    background: #cbd5e1;
+    position: relative;
+}
+
+.merge-node::after {
+    left: 50%;
+    bottom: -1px;
+    transform: translateX(-50%);
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid #cbd5e1;
+}
+
+.loop-flow {
+    gap: 0.9rem;
+}
+
+.loop-flow::before,
+.loop-flow::after,
+.loop-return,
+.loop-exit {
+    display: none !important;
+}
+
+.loop-flow .loop-label.true,
+.loop-flow .loop-label.false {
+    position: static;
+}
+
+.loop-flow .loop-label.false {
+    margin-top: -0.25rem;
+}
+
+.loop-body {
+    width: min(430px, 100%);
+    margin-top: 0.15rem;
+    position: relative;
+}
+
+.loop-body::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: -1.15rem;
+    height: 1.15rem;
+    border-left: 2px solid #22c55e;
+}
+
+.loop-body::after {
+    left: calc(50% - 6px);
+    top: -0.12rem;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid #22c55e;
+}
+
+.while-flow::after,
+.for-flow::after {
+    content: "Retorna a condicion";
+    display: block;
+    color: #94a3b8;
+    font-size: 0.72rem;
+    border: 1px solid #475569;
+    border-radius: 999px;
+    padding: 0.18rem 0.7rem;
+}
+
+.for-config,
+.for-increment {
+    width: 320px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    padding: 0.4rem 0.65rem;
+    border: 2px solid #eab308;
+    border-radius: 8px;
+    background: #1f2a3d;
+    position: relative;
+}
+
+.for-config::after {
+    left: 50%;
+    bottom: -1.05rem;
+    width: 2px;
+    height: 1.05rem;
+    background: #cbd5e1;
+}
+
+.for-increment::before {
+    left: 50%;
+    top: -1.05rem;
+    width: 2px;
+    height: 1.05rem;
+    background: #cbd5e1;
+}
+
+.nested-zone > .flow-block {
+    width: min(100%, 330px);
+    min-width: 0;
+}
+
+.nested-zone > .flow-block.print,
+.nested-zone > .flow-block.input {
+    min-width: 250px;
+}
+
+.nested-zone > .flow-block:not(:last-child)::after {
+    bottom: -1.85rem;
+    font-size: 1.35rem;
+}
 /* Drop Indicator */
 .drop-indicator {
     height: 4px;
@@ -743,3 +1020,4 @@ pre {
     outline: none;
     line-height: 24px;
 }
+
