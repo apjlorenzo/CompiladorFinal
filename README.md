@@ -37,8 +37,8 @@ resultado["ok"]       # True si no hay errores semánticos
 - Declaraciones y reasignaciones de variables
 - Operadores: `+`, `-`, `*`, `/`, `=`, `<`, `>`, `<=`, `>=`, `==`, `!=`
 - Control de flujo: `if/else`, `while`, `for` (con `i++` / `i--`)
-- Salida: `println(...)`, `print(...)`, `cout <<`, `printf(...)`, `puts(...)`
-- Entrada: `scanf("%d", variable)`
+- Salida: `println(...)`, `print(...)`, `printf(...)`, `puts(...)`
+- Entrada interactiva: no soportada; `scanf` fue retirado del compilador.
 - Comentarios: `// línea` y `/* bloque */`
 
 ## Traducción y generación

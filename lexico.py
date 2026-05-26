@@ -10,10 +10,10 @@ token_patron = {
     "COMENTARIO": r'//[^\n]*|/\*.*?\*/',
     # Cadenas de texto entre comillas dobles
     "STRING"    : r'"[^"]*"',
+    "CHAR"      : r"'(?:\\.|[^\\'])'",
     # Palabras reservadas
-    "KEYWORD"   : r'\b(if|else|while|for|return|int|float|string|void'
-                  r'|cout|print|println'
-                  r'|printf|puts|scanf)\b',
+    "KEYWORD"   : r'\b(if|else|while|for|return|int|float|char|void'
+                  r'|print|println|printf|puts)\b',
     # Identificadores
     "IDENTIFIER": r'\b[a-zA-Z_][a-zA-Z0-9_]*\b',
     # Literales de coma flotante (ANTES que INTEGER)
@@ -21,9 +21,9 @@ token_patron = {
     # Literales enteros
     "INTEGER"   : r'\b\d+\b',
     # Operadores (incluyendo ++ y --)
-    "OPERATOR"  : r'\+\+|--|<<|<=|>=|==|!=|[+\-*/=<>!]',
+    "OPERATOR"  : r'\+\+|--|\+=|-=|\*=|/=|<=|>=|==|!=|[+\-*/%=<>!]',
     # Delimitadores
-    "DELIMITER" : r'[(),;{}\'\"]',
+    "DELIMITER" : r'[(),;{}\[\]]',
     # Espacios (se descartan)
     "WHITESPACE": r'\s+',
 }

@@ -4,16 +4,17 @@ semantico.py â€” AnÃ¡lisis semÃ¡ntico del compilador.
 Mantiene la estructura completa de mi compilador (RAR) con:
   - TablaSimbolos con soporte de Ã¡mbitos anidados (pila de scopes)
   - AnalizadorSemantico con inferencia de tipos, detecciÃ³n de errores y avisos
-  - Soporte para NodoImprimir, NodoIncremento y NodoEntrada (del inge)
+  - Soporte para NodoImprimir y NodoIncremento (del inge)
 """
 
+import os
 import re
 
 from node import (
     NodoPrograma, NodoFuncion, NodoParametro, NodoAsignacion,
     NodoOperacion, NodoRetorno, NodoIdent, NodoNumero, NodoString,
-    NodoLlamadaFuncion, NodoInstruccion, NodoPrint, NodoImprimir,
-    NodoWhile, NodoFor, NodoIf, NodoIncremento, NodoEntrada,
+    NodoLlamadaFuncion, NodoPrint, NodoImprimir,
+    NodoWhile, NodoFor, NodoIf, NodoIncremento,
 )
 
 
@@ -200,7 +201,7 @@ class AnalizadorSemantico:
       5. Variables declaradas y no usadas â†’ aviso
       6. Llamadas a funciones no declaradas
       7. Tipo de retorno incompatible
-      8. Soporte para NodoImprimir (printf/puts), NodoIncremento, NodoEntrada
+      8. Soporte para NodoImprimir (printf/puts) y NodoIncremento
     """
 
     def __init__(self):
@@ -254,12 +255,17 @@ class AnalizadorSemantico:
         
         self.offset_local = 0
         self.offset_param = 8
-        
+
         for p in nodo.parametros:
             sim = Simbolo(p.nombre[1], p.tipo[1], "parametro", nombre)
             size = 8 if p.tipo[1] in ("float", "string") else 4
-            sim.offset = self.offset_param
-            self.offset_param += size
+            if os.name == "nt":
+                self.offset_local += size
+                sim.offset = -self.offset_local
+            else:
+                sim.offset = self.offset_param
+                self.offset_param += size
+            p.offset = sim.offset
             
             if not self.tabla.insertar(sim):
                 self._err("VAR_YA_DECLARADA",
@@ -340,24 +346,12 @@ class AnalizadorSemantico:
             if isinstance(inst, NodoImprimir):
                 self._validar_imprimir(inst, ambito)
 
-        elif isinstance(inst, NodoEntrada):
-            if inst.tipo[1] == "scanf" and not self.tiene_stdio:
-                self._err("FUNC_NO_DECLARADA", "Uso de scanf sin haber incluido <stdio.h>", ambito, self._get_line(inst))
-            sim = self.tabla.buscar(inst.variable[1])
-            if sim is None:
-                self._err("VAR_NO_DECLARADA",
-                           f"Variable '{inst.variable[1]}' usada en scanf sin declarar", ambito, self._get_line(inst))
-            else:
-                sim.usado = True
-                inst.sim_clase = sim.clase
-                inst.offset = sim.offset
-
         elif isinstance(inst, NodoIncremento):
             sim = self.tabla.buscar(inst.nombre[1])
             if sim is None:
                 self._err("VAR_NO_DECLARADA",
                            f"Variable '{inst.nombre[1]}' usada en incremento sin declarar", ambito, self._get_line(inst))
-            elif sim.tipo not in ("int", "float"):
+            elif sim.tipo not in ("int", "float", "char"):
                 self._err("TIPO_INCOMPATIBLE",
                            f"No se puede aplicar '{inst.operador[1]}' a variable '{inst.nombre[1]}' de tipo '{sim.tipo}'",
                            ambito, self._get_line(inst))
@@ -384,6 +378,8 @@ class AnalizadorSemantico:
             for spec, arg in zip(especificadores, valores):
                 tipo_arg = self._tipo_expr(arg, ambito)
                 esperado = "int" if spec.endswith("d") else ("float" if spec.endswith("f") else "string")
+                if esperado == "int" and tipo_arg == "char":
+                    continue
                 if tipo_arg and tipo_arg != esperado:
                     self._err("TIPO_INCOMPATIBLE",
                               f"printf usa {spec}, pero recibio '{tipo_arg}'",
@@ -425,7 +421,9 @@ class AnalizadorSemantico:
                        f"Variable '{nombre}' ya declarada en '{ambito}'", ambito, self._get_line(nodo))
         tipo_expr = self._tipo_expr(nodo.expresion, ambito)
         if tipo_expr and tipo_decl != tipo_expr:
-            if set([tipo_decl, tipo_expr]) == {"int", "float"}:
+            if tipo_decl == "char" and tipo_expr == "int":
+                pass
+            elif set([tipo_decl, tipo_expr]) == {"int", "float"}:
                 self._avi("TIPO_INCOMPATIBLE",
                            f"AsignaciÃ³n de '{tipo_expr}' a '{tipo_decl} {nombre}' (conversiÃ³n implÃ­cita)",
                            ambito, self._get_line(nodo))
@@ -454,6 +452,10 @@ class AnalizadorSemantico:
                     if float(der) == 0.0:
                         return "DIVISION_CERO"
                     return izq / der
+                if op == "%":
+                    if float(der) == 0.0:
+                        return "DIVISION_CERO"
+                    return int(izq) % int(der)
                 if op == "<": return int(izq < der)
                 if op == ">": return int(izq > der)
                 if op == "<=": return int(izq <= der)
@@ -492,7 +494,7 @@ class AnalizadorSemantico:
         if isinstance(nodo, NodoOperacion):
             ti = self._tipo_expr(nodo.izquierda, ambito)
             td = self._tipo_expr(nodo.derecha,   ambito)
-            if nodo.operador[1] == "/":
+            if nodo.operador[1] in ("/", "%"):
                 valor_divisor = self._valor_constante(nodo.derecha)
                 if valor_divisor == "DIVISION_CERO" or valor_divisor == 0 or valor_divisor == 0.0:
                     self._err("DIVISION_CERO", "Division por cero detectada en el divisor", ambito, self._get_line(nodo))
@@ -503,6 +505,8 @@ class AnalizadorSemantico:
                 return None
             if ti == td:
                 return ti
+            if set([ti, td]) == {"int", "char"}:
+                return "int"
             if set([ti, td]) == {"int", "float"}:
                 self._avi("TIPO_INCOMPATIBLE",
                            f"OperaciÃ³n 'int {nodo.operador[1]} float' â€” se promueve a float",

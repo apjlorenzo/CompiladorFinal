@@ -269,6 +269,9 @@ def _linea_fuente(codigo, linea):
 
 
 def _diagnostico(codigo, fase, mensaje, severidad="error", linea=None, columna=None):
+    mensaje_texto = str(mensaje).strip()
+    if "token no reconocido '&'" in mensaje_texto:
+        mensaje_texto = "'&' no esta soportado. scanf no forma parte de este compilador; usa valores directos o asignaciones."
     if linea is None or columna is None:
         match = re.search(r"L(?:i|í|Ã­)nea\s+(\d+)(?:,\s*Columna\s+(\d+))?", str(mensaje))
         if match:
@@ -279,7 +282,7 @@ def _diagnostico(codigo, fase, mensaje, severidad="error", linea=None, columna=N
         "severidad": severidad,
         "linea": linea,
         "columna": columna,
-        "mensaje": str(mensaje).strip(),
+        "mensaje": mensaje_texto,
         "fuente": _linea_fuente(codigo, linea),
     }
 

@@ -2,7 +2,7 @@
 # NODOS DEL ÁRBOL DE SINTAXIS ABSTRACTA (AST)
 # ===========================================================================
 # Estructura: mi compilador (RAR) como base.
-# Adiciones del inge (ZIP): NodoString, NodoIncremento, NodoEntrada,
+# Adiciones del inge (ZIP): NodoString, NodoIncremento,
 #   NodoImprimir (printf/puts), optimizador algebraico en NodoOperacion.
 # Traducciones disponibles: Python, Ruby, Rust.
 # Generación de código: ensamblador NASM ELF32 (x87 FPU para floats).
@@ -68,13 +68,12 @@ class NodoPrograma(NodoAST):
             '    fmt_int db "%d", 10, 0',
             '    fmt_float db "%f", 10, 0',
             '    fmt_str db "%s", 10, 0',
-            '    fmt_scanf db "%d", 0',
             '    msg_div_zero db "Error de ejecucion: division por cero", 10, 0',
             '    __flt_zero dq 0.0',
             '    fmt_nl db 10, 0'
         ]
         data_bss  = ["section .bss", "    __float_print_tmp resq 1"]
-        codigo    = ["extern printf", "extern scanf", "extern fflush", "section .text", "global main"]
+        codigo    = ["extern printf", "extern fflush", "section .text", "global main"]
         float_consts_vistas = set()
 
         def recolectar_datos(nodo):
@@ -167,6 +166,15 @@ class NodoFuncion(NodoAST):
             codigo += "    push rbp\n"
             codigo += "    mov rbp, rsp\n"
             codigo += f"    sub rsp, {reserva}  ; locales y shadow space Win64\n"
+            arg_regs = ["ecx", "edx", "r8d", "r9d"]
+            for idx, param in enumerate(self.parametros[:4]):
+                if hasattr(param, "offset") and param.offset is not None:
+                    sign = "+" if param.offset > 0 else "-"
+                    op_str = f"rbp {sign} {abs(param.offset)}"
+                    if param.tipo[1] == "float":
+                        codigo += f"    movsd qword [{op_str}], xmm{idx}  ; parametro {param.nombre[1]}\n"
+                    else:
+                        codigo += f"    mov dword [{op_str}], {arg_regs[idx]}  ; parametro {param.nombre[1]}\n"
         else:
             codigo += "    push ebp\n"
             codigo += "    mov ebp, esp\n"
@@ -367,6 +375,8 @@ class NodoOperacion(NodoAST):
                 if not ES_WIN64:
                     codigo += ["    fldz", f"    jmp {fin_lbl}"]
                 codigo += [f"{ok_lbl}:", "    fdivp               ; ST(1)/ST(0), pop", f"{fin_lbl}:"]
+            elif op == "%":
+                codigo.append("    ; modulo no aplica a float")
         else:
             codigo.append(self.izquierda.generarCodigo())
             codigo.append("    push   rax" if ES_WIN64 else "    push   eax")
@@ -377,7 +387,7 @@ class NodoOperacion(NodoAST):
             if op == "+":   codigo.append(f"    add    eax, {derecha}")
             elif op == "-": codigo.append(f"    sub    eax, {derecha}")
             elif op == "*": codigo.append(f"    imul   eax, {derecha}")
-            elif op == "/":
+            elif op in ("/", "%"):
                 ok_lbl, zero_lbl, fin_lbl = self._nuevo_div_guard()
                 codigo.append(f"    cmp    {derecha}, 0")
                 codigo.append(f"    jne    {ok_lbl}")
@@ -399,6 +409,8 @@ class NodoOperacion(NodoAST):
                 codigo.append(f"{ok_lbl}:")
                 codigo.append("    cdq")
                 codigo.append(f"    idiv   {derecha}")
+                if op == "%":
+                    codigo.append("    mov    eax, edx")
                 codigo.append(f"{fin_lbl}:")
         return "\n".join(codigo)
 
@@ -611,6 +623,14 @@ class NodoLlamadaFuncion(NodoAST):
         self.argumentos     = argumentos # lista de nodos
 
     def generarCodigo(self):
+        if ES_WIN64:
+            arg_regs = ["ecx", "edx", "r8d", "r9d"]
+            codigo = []
+            for idx, arg in enumerate(self.argumentos[:4]):
+                codigo.append(arg.generarCodigo())
+                codigo.append(f"    mov {arg_regs[idx]}, eax   ; argumento {idx + 1}")
+            codigo.append(f"    call {self.nombre_funcion}")
+            return "\n".join(codigo)
         codigo = []
         for arg in reversed(self.argumentos):
             codigo.append(arg.generarCodigo())
@@ -630,41 +650,6 @@ class NodoLlamadaFuncion(NodoAST):
     def traducirRust(self):
         args = ", ".join(a.traducirRust() for a in self.argumentos)
         return f"{self.nombre_funcion}({args})"
-
-
-# ---------------------------------------------------------------------------
-# NodoInstruccion  (cout — estilo mi compilador original)
-# ---------------------------------------------------------------------------
-
-class NodoInstruccion(NodoAST):
-    def __init__(self, tipo, argumentos):
-        self.tipo_instruccion       = tipo       # token KEYWORD (cout)
-        self.argumentos_instruccion = argumentos # lista de strings
-
-    def traducirPy(self):
-        if self.tipo_instruccion[1] == "cout":
-            args = ", ".join(f'"{a}"' if isinstance(a, str) else a.traducirPy()
-                             for a in self.argumentos_instruccion)
-            return f"print({args})"
-        return ""
-
-    def traducirRuby(self):
-        if self.tipo_instruccion[1] == "cout":
-            args = " ".join(a if isinstance(a, str) else a.traducirRuby()
-                            for a in self.argumentos_instruccion)
-            return f'puts "{args}"'
-        return ""
-
-    def traducirRust(self):
-        if self.tipo_instruccion[1] == "cout":
-            args = ", ".join(f'"{a}"' if isinstance(a, str) else a.traducirRust()
-                             for a in self.argumentos_instruccion)
-            return f'println!("{{}}", {args});'
-        return ""
-
-    def generarCodigo(self):
-        # cout no genera código asm en esta versión; se usa NodoPrint para println/print
-        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -740,7 +725,6 @@ class NodoImprimir(NodoAST):
                 if _es_float_expr(valor_arg):
                     codigo.append("    fstp qword [rel __float_print_tmp]")
                     codigo.append("    movsd xmm1, qword [rel __float_print_tmp]")
-                    codigo.append("    mov rdx, [rel __float_print_tmp]")
                 elif getattr(valor_arg, '_tipo', None) == "string":
                     codigo.append("    mov rdx, rax")
                 else:
@@ -753,7 +737,6 @@ class NodoImprimir(NodoAST):
                 if _es_float_expr(arg):
                     codigo.append("    fstp qword [rel __float_print_tmp]")
                     codigo.append("    movsd xmm1, qword [rel __float_print_tmp]")
-                    codigo.append("    mov rdx, [rel __float_print_tmp]")
                     codigo.append("    lea rcx, [rel fmt_float]")
                 elif getattr(arg, '_tipo', None) == "string":
                     codigo.append("    mov rdx, rax")
@@ -763,9 +746,11 @@ class NodoImprimir(NodoAST):
                     codigo.append("    lea rcx, [rel fmt_int]")
             else:
                 codigo.append("    lea rcx, [rel fmt_int]")
+            codigo.append("    mov al, 1" if _es_float_expr(valor_arg) else "    xor eax, eax")
             codigo.append("    call printf")
             if self.tipo[1] == "puts":
                 codigo.append("    lea rcx, [rel fmt_nl]")
+                codigo.append("    xor eax, eax")
                 codigo.append("    call printf")
             codigo.append("    xor ecx, ecx")
             codigo.append("    call fflush")
@@ -1027,60 +1012,3 @@ class NodoIf(NodoAST):
         return res
 
 
-# ---------------------------------------------------------------------------
-# NodoEntrada  (nuevo — del inge: scanf)
-# ---------------------------------------------------------------------------
-
-class NodoEntrada(NodoAST):
-    def __init__(self, tipo, formato, variable):
-        self.tipo     = tipo      # token KEYWORD (scanf)
-        self.formato  = formato   # NodoString con el formato, e.g. "%d"
-        self.variable = variable  # token IDENTIFIER
-
-    def generarCodigo(self):
-        if ES_WIN64:
-            if hasattr(self, 'offset') and self.offset is not None:
-                sign = "+" if self.offset > 0 else "-"
-                op_str = f"{_base_pila()} {sign} {abs(self.offset)}"
-                destino = f"[{op_str}]"
-            else:
-                destino = f"[rel {self.variable[1]}]"
-            return (
-                f"    lea  rdx, {destino}\n"
-                f"    lea  rcx, [rel fmt_scanf]\n"
-                f"    call scanf"
-            )
-
-        if hasattr(self, 'offset') and self.offset is not None:
-            sign = "+" if self.offset > 0 else "-"
-            op_str = f"{_base_pila()} {sign} {abs(self.offset)}"
-            return (
-                f"    lea  eax, [{op_str}]\n"
-                f"    push eax\n"
-                f"    push fmt_scanf\n"
-                f"    call scanf\n"
-                f"    add  esp, 8"
-            )
-        else:
-            var = self.variable[1]
-            return (
-                f"    lea  eax, [{var}]\n"
-                f"    push eax\n"
-                f"    push fmt_scanf\n"
-                f"    call scanf\n"
-                f"    add  esp, 8"
-            )
-
-    def traducirPy(self):
-        return f"{self.variable[1]} = int(input())"
-
-    def traducirRuby(self):
-        return f"{self.variable[1]} = gets.chomp.to_i"
-
-    def traducirRust(self):
-        v = self.variable[1]
-        return (
-            f"let mut {v}_str = String::new();\n"
-            f"    std::io::stdin().read_line(&mut {v}_str).unwrap();\n"
-            f"    let {v}: i32 = {v}_str.trim().parse().unwrap();"
-        )

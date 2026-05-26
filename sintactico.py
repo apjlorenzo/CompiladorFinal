@@ -2,8 +2,8 @@
 from node import (
     NodoPrograma, NodoFuncion, NodoParametro, NodoAsignacion,
     NodoOperacion, NodoRetorno, NodoIdent, NodoNumero, NodoString,
-    NodoLlamadaFuncion, NodoInstruccion, NodoPrint, NodoImprimir,
-    NodoWhile, NodoFor, NodoIf, NodoIncremento, NodoEntrada,
+    NodoLlamadaFuncion, NodoPrint, NodoImprimir,
+    NodoWhile, NodoFor, NodoIf, NodoIncremento,
 )
 from lexico import identificar_tokens
 
@@ -19,7 +19,7 @@ class Parser:
         params        â†’ (KEYWORD IDENTIFIER (',' KEYWORD IDENTIFIER)*)
         cuerpo        â†’ instruccion*
         instruccion   â†’ retorno | asignacion | if | while | for
-                       | cout | print | println | printf | puts | scanf
+                       | print | println | printf | puts
                        | llamadaFuncion ';'
         asignacion    â†’ KEYWORD IDENTIFIER '=' expresion ';'
         expresion     â†’ termino (OPERATOR termino)*
@@ -29,7 +29,7 @@ class Parser:
     def __init__(self, tokens):
         self.tokens     = tokens
         self.pos        = 0
-        # Tabla de tipos declarados: { nombre_var: "int" | "float" | "string" }
+        # Tabla de tipos declarados: { nombre_var: "int" | "float" | "char" | "string" }
         # El parser la construye para inyectar el tipo en NodoIdent
         self.tabla_tipos = {}
         self.tiene_stdio = False
@@ -158,22 +158,33 @@ class Parser:
             v   = tok[1]
             t   = tok[0]
             if   v == "return":                instrucciones.append(self.retorno())
-            elif v == "cout":                  instrucciones.append(self.impresion_cout())
+            elif v == "cout":                  self._error_cpp(tok)
             elif v in ("print", "println"):    instrucciones.append(self.instruccion_print())
             elif v in ("printf", "puts"):      instrucciones.append(self.instruccion_printf())
-            elif v == "scanf":                 instrucciones.append(self.instruccion_scanf())
+            elif v == "scanf":                 self._error_scanf(tok)
             elif v == "while":                 instrucciones.append(self.instruccion_while())
             elif v == "for":                   instrucciones.append(self.instruccion_for())
             elif v == "if":                    instrucciones.append(self.instruccion_if())
+            elif t == "KEYWORD":
+                decl = self.asignacion()
+                if isinstance(decl, list):
+                    instrucciones.extend(decl)
+                else:
+                    instrucciones.append(decl)
             elif t == "IDENTIFIER":
                 sig = self.tokens[self.pos + 1] if self.pos + 1 < len(self.tokens) else None
-                if sig and sig[0] == "OPERATOR" and sig[1] in ("++", "--"):
+                if v == "scanf":
+                    self._error_scanf(tok)
+                elif v in ("cout", "string"):
+                    self._error_cpp(tok)
+                elif sig and sig[0] == "OPERATOR" and sig[1] in ("++", "--"):
                     instrucciones.append(self.instruccion_incremento())
                 elif sig and sig[0] == "OPERATOR" and sig[1] in ("+", "-"):
                     raise SyntaxError(f"Linea {tok[2]}: incremento incompleto. Usa {tok[1]}++ o {tok[1]}--")
                 else:
                     instrucciones.append(self.reasignacion())
-            else:                              instrucciones.append(self.asignacion())
+            else:
+                raise SyntaxError(f"Linea {tok[2]}: sintaxis no soportada cerca de '{tok[1]}'")
         return instrucciones
 
     # -----------------------------------------------------------------------
@@ -181,7 +192,33 @@ class Parser:
     # -----------------------------------------------------------------------
 
     def asignacion(self):
-        tipo   = self.coincidir("KEYWORD")
+        tipo = self.coincidir("KEYWORD")
+        declaraciones = []
+        while True:
+            nombre = self.coincidir("IDENTIFIER")
+            tipo_var = tipo
+            if tipo[1] == "char" and self.obtener_token() and self.obtener_token()[1] == "[":
+                self.coincidir_valor("[")
+                self.coincidir_valor("]")
+                tipo_var = ("KEYWORD", "string", tipo[2], tipo[3])
+            self.tabla_tipos[nombre[1]] = tipo_var[1]
+            if self.obtener_token() and self.obtener_token()[1] in (";", ","):
+                expresion = self._valor_default(tipo_var, nombre)
+            else:
+                self.coincidir_valor("=")
+                expresion = self.expresion()
+            nodo = NodoAsignacion(tipo_var, nombre, expresion)
+            nodo.es_declaracion = True
+            declaraciones.append(nodo)
+            if self.obtener_token() and self.obtener_token()[1] == ",":
+                self.coincidir_valor(",")
+                continue
+            break
+        self.coincidir_valor(";")
+        return declaraciones[0] if len(declaraciones) == 1 else declaraciones
+
+    def asignacion_for(self):
+        tipo = self.coincidir("KEYWORD")
         nombre = self.coincidir("IDENTIFIER")
         self.tabla_tipos[nombre[1]] = tipo[1]
         if self.obtener_token() and self.obtener_token()[1] == ";":
@@ -189,7 +226,6 @@ class Parser:
         else:
             self.coincidir_valor("=")
             expresion = self.expresion()
-        self.coincidir_valor(";")
         nodo = NodoAsignacion(tipo, nombre, expresion)
         nodo.es_declaracion = True
         return nodo
@@ -203,13 +239,24 @@ class Parser:
 
     def reasignacion(self):
         """ReasignaciÃ³n sin declaraciÃ³n de tipo: variable = expresion;"""
+        nodo = self.reasignacion_for()
+        self.coincidir_valor(";")
+        return nodo
+
+    def reasignacion_for(self):
+        """Reasignacion sin consumir ';', usada dentro de for (...; ...; ...)."""
         nombre = self.coincidir("IDENTIFIER")
         # Tipo inferido de la tabla
         tipo_str = self.tabla_tipos.get(nombre[1], "int")
         tipo_sintetico = ("KEYWORD", tipo_str)
-        self.coincidir_valor("=")
-        expresion = self.expresion()
-        self.coincidir_valor(";")
+        op = self.coincidir("OPERATOR")
+        if op[1] == "=":
+            expresion = self.expresion()
+        elif op[1] in ("+=", "-=", "*=", "/="):
+            base_op = ("OPERATOR", op[1][0], op[2], op[3])
+            expresion = NodoOperacion(NodoIdent(nombre, tipo=tipo_str), base_op, self.expresion())
+        else:
+            raise SyntaxError(f"Linea {op[2]}: operador de asignacion no soportado '{op[1]}'")
         nodo = NodoAsignacion(tipo_sintetico, nombre, expresion)
         nodo.es_declaracion = False
         return nodo
@@ -226,19 +273,8 @@ class Parser:
         self.coincidir_valor(";")
         return NodoRetorno(expresion)
 
-    # --- cout << "texto"; (estilo C++ simplificado, mi compilador original) ---
-    def impresion_cout(self):
-        keyword = self.coincidir("KEYWORD")   # cout
-        self.coincidir("OPERATOR")            # <<
-        delim_ap = self.coincidir("DELIMITER")
-        char_cierre = delim_ap[1]
-        contenido = []
-        while self.obtener_token() and self.obtener_token()[1] != char_cierre:
-            contenido.append(self.obtener_token()[1])
-            self.pos += 1
-        self.coincidir("DELIMITER")           # cierre de comilla
-        self.coincidir_valor(";")
-        return NodoInstruccion(keyword, [" ".join(contenido)])
+    def _error_cpp(self, tok):
+        raise SyntaxError(f"Linea {tok[2]}: sintaxis C++ no soportada. Usa printf(), puts(), print() o println().")
 
     def instruccion_print(self):
         keyword = self.coincidir("KEYWORD")   # print / println
@@ -283,16 +319,11 @@ class Parser:
         self.coincidir_valor(";")
         return NodoImprimir(keyword, argumentos)
 
-    # --- scanf("%d", variable); ---
-    def instruccion_scanf(self):
-        keyword = self.coincidir("KEYWORD")   # scanf
-        self.coincidir_valor("(")
-        formato  = self.termino()             # NodoString con "%d" etc.
-        self.coincidir_valor(",")
-        variable = self.coincidir("IDENTIFIER")
-        self.coincidir_valor(")")
-        self.coincidir_valor(";")
-        return NodoEntrada(keyword, formato, variable)
+    def _error_scanf(self, tok):
+        raise SyntaxError(
+            f"Linea {tok[2]}: scanf no esta soportado por este compilador. "
+            "Usa valores directos, asignaciones o printf/puts para salida."
+        )
 
     # --- while (cond) { cuerpo } ---
     def instruccion_while(self):
@@ -319,12 +350,13 @@ class Parser:
         if tok[1] == ";":
             raise SyntaxError(f"Linea {tok[2]}: for necesita inicializacion, por ejemplo int i = 0 o i = 0")
         if tok[0] == "KEYWORD":
-            inicio = self.asignacion()
+            inicio = self.asignacion_for()
         elif tok[0] == "IDENTIFIER":
-            inicio = self.reasignacion()
+            inicio = self.reasignacion_for()
         else:
             raise SyntaxError(f"Linea {tok[2]}: inicializacion invalida en for. Usa int i = 0 o i = 0")
 
+        self.coincidir_valor(";")
         if self.obtener_token() and self.obtener_token()[1] == ";":
             tok = self.obtener_token()
             raise SyntaxError(f"Linea {tok[2]}: for necesita una condicion, por ejemplo i <= 10")
@@ -402,7 +434,7 @@ class Parser:
         izquierda = self.termino()
         while (self.obtener_token()
                and self.obtener_token()[0] == "OPERATOR"
-               and self.obtener_token()[1] in ("*", "/")):
+               and self.obtener_token()[1] in ("*", "/", "%")):
             operador = self.coincidir("OPERATOR")
             derecha = self.termino()
             izquierda = NodoOperacion(izquierda, operador, derecha)
@@ -422,7 +454,17 @@ class Parser:
         if tok[0] in ("INTEGER", "FLOAT", "NUMBER"):
             return NodoNumero(self.coincidir_numero())
 
-        # Literal de cadena (para printf/puts/scanf)
+        if tok[0] == "CHAR":
+            char_tok = self.coincidir("CHAR")
+            contenido = char_tok[1][1:-1]
+            if contenido.startswith("\\"):
+                mapa = {"n": 10, "t": 9, "r": 13, "0": 0, "'": 39, "\\": 92}
+                valor = mapa.get(contenido[1:], ord(contenido[-1]))
+            else:
+                valor = ord(contenido[0])
+            return NodoNumero(("INTEGER", str(valor), char_tok[2], char_tok[3]))
+
+        # Literal de cadena (para printf/puts)
         if tok[0] == "STRING":
             return NodoString(self.coincidir("STRING"))
 
@@ -521,8 +563,6 @@ def imprimir_ast(nodo):
             "nombre"   : nodo.nombre_funcion,
             "argumentos": [imprimir_ast(a) for a in nodo.argumentos],
         }
-    if isinstance(nodo, NodoInstruccion):
-        return {"tipo": nodo.tipo_instruccion[1], "args": nodo.argumentos_instruccion}
     if isinstance(nodo, NodoPrint):
         return {"tipo": nodo.tipo_print[1], "texto": nodo.argumentos}
     if isinstance(nodo, NodoImprimir):
@@ -554,8 +594,6 @@ def imprimir_ast(nodo):
         return resultado
     if isinstance(nodo, NodoIncremento):
         return {"tipo": "incremento", "variable": nodo.nombre[1], "op": nodo.operador[1]}
-    if isinstance(nodo, NodoEntrada):
-        return {"tipo": nodo.tipo[1], "variable": nodo.variable[1]}
     return None
 
 

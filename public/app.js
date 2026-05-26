@@ -331,7 +331,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <select class="block-input short" name="tipo">
                             <option value="int">int</option>
                             <option value="float">float</option>
-                            <option value="string">string</option>
+                            <option value="char">char</option>
                             <option value="">(none)</option>
                         </select>
                         <input type="text" class="block-input short" placeholder="A" name="var">
@@ -400,13 +400,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         <input type="text" class="block-input" placeholder="'Hola !'" name="val">
                     </div>`;
                 break;
-            case 'input':
-                title = 'Leer';
-                bodyHTML = `
-                    <div class="block-body">
-                        <input type="text" class="block-input short" placeholder="Dato1" name="var">
-                    </div>`;
-                break;
             case 'else':
                 title = 'Si No (Else)';
                 bodyHTML = `<div style="text-align:center;font-size:0.8rem;opacity:0.7">Rama Falsa</div>`;
@@ -472,10 +465,6 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (type === 'print') {
                 const val = block.querySelector('[name="val"]').value || '""';
                 code += `${indent}println(${val});\n`;
-            }
-            else if (type === 'input') {
-                const v = block.querySelector('[name="var"]').value || 'temp';
-                code += `${indent}scanf("%d", ${v});\n`;
             }
             else if (type === 'if') {
                 const cond = block.querySelector('[name="cond"]').value || '1';
@@ -576,24 +565,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     block.querySelector('[name="val"]').value = match[2];
                     appendBlock(block);
                 }
-            } else if (line.startsWith('scanf')) {
-                const match = line.match(/scanf\s*\(\s*".*?"\s*,\s*(.*?)\)/);
-                if (match) {
-                    const block = createBlock('input');
-                    block.querySelector('[name="var"]').value = match[1];
-                    appendBlock(block);
-                }
             } else {
-                const declarationMatch = line.match(/^(int|float|string)\s+([a-zA-Z_]\w*)\s*;$/);
+                const declarationMatch = line.match(/^(int|float|char)\s+([a-zA-Z_]\w*)\s*;$/);
                 if (declarationMatch) {
                     const block = createBlock('assign');
                     block.querySelector('[name="tipo"]').value = declarationMatch[1];
                     block.querySelector('[name="var"]').value = declarationMatch[2];
-                    block.querySelector('[name="exp"]').value = declarationMatch[1] === 'float' ? '0.0' : (declarationMatch[1] === 'string' ? '""' : '0');
+                    block.querySelector('[name="exp"]').value = declarationMatch[1] === 'float' ? '0.0' : (declarationMatch[1] === 'char' ? "'A'" : '0');
                     appendBlock(block);
                     continue;
                 }
-                const assignMatch = line.match(/^(?:(int|float|string)\s+)?([a-zA-Z_]\w*)\s*=\s*(.*?);$/);
+                const assignMatch = line.match(/^(?:(int|float|char)\s+)?([a-zA-Z_]\w*)\s*=\s*(.*?);$/);
                 if (assignMatch) {
                     const block = createBlock('assign');
                     if (assignMatch[1]) block.querySelector('[name="tipo"]').value = assignMatch[1];
