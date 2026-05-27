@@ -1,11 +1,11 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Compilador visual</title>
-    <link rel="stylesheet" href="styles.css?v=20260523-6">
+    <link rel="stylesheet" href="styles.css?v=20260526-diagrams">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
         rel="stylesheet">
@@ -41,22 +41,22 @@
             <div class="toolbar-title">Diagramas de Flujo</div>
             <div class="toolbar" id="toolbox">
                 <div class="tool-btn" draggable="true" data-type="start">
-                    <span class="icon"></span> Inicio/Fin
+                    <span class="icon"></span> Inicio
                 </div>
                 <div class="tool-btn" draggable="true" data-type="assign">
                     <span class="icon"></span> Asignacion
                 </div>
                 <div class="tool-btn" draggable="true" data-type="if">
-                    <span class="icon"></span> Decision (Si)
+                    <span class="icon"></span> If/else
                 </div>
                 <div class="tool-btn" draggable="true" data-type="while">
-                    <span class="icon"></span> Bucle (Mientras)
+                    <span class="icon"></span> while
                 </div>
                 <div class="tool-btn" draggable="true" data-type="for">
-                    <span class="icon"></span> Bucle (Para)
+                    <span class="icon"></span> for
                 </div>
                 <div class="tool-btn" draggable="true" data-type="print">
-                    <span class="icon"></span> Salida (Imprimir)
+                    <span class="icon"></span> Imprimir
                 </div>
                 <div class="tool-btn" draggable="true" data-type="end">
                     <span class="icon"></span> Fin Bloque
@@ -104,7 +104,7 @@
             </div>
             
             <div id="interactive-terminal" class="interactive-terminal">
-                <div class="term-header">Terminal Interactiva (NASM)</div>
+                <div class="term-header">Terminal (NASM)</div>
                 <div class="term-output" id="term-output">Esperando compilacion y ejecucion...</div>
                 <div class="term-input-row" id="term-input-row" style="display: none;">
                     <span class="prompt">&gt;</span>
@@ -155,7 +155,7 @@
         </aside>
     </div>
 
-    <script src="app.js?v=20260523-6"></script>
+    <script src="app.js?v=20260526-diagrams"></script>
 </body>
 
 </html>

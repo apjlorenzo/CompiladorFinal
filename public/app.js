@@ -5,6 +5,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const canvas = document.getElementById('canvas');
     const lineNumbers = document.getElementById('code-line-numbers');
     let draggedType = null;
+    let diagramTimer = null;
+    let lastValidDiagram = null;
+    let syncingCodeFromDiagram = false;
+    let sourceEditedSinceDiagram = true;
+    let diagramEditedSinceCode = false;
 
     const saveSourceButton = document.getElementById('btn-save');
     if (saveSourceButton) {
@@ -19,7 +24,14 @@ document.addEventListener('DOMContentLoaded', () => {
         lineNumbers.scrollTop = editor.scrollTop;
     };
 
-    editor?.addEventListener('input', updateLineNumbers);
+    editor?.addEventListener('input', () => {
+        updateLineNumbers();
+        if (!syncingCodeFromDiagram) {
+            sourceEditedSinceDiagram = true;
+            diagramEditedSinceCode = false;
+        }
+        scheduleDiagramSync();
+    });
     editor?.addEventListener('scroll', () => {
         if (lineNumbers) lineNumbers.scrollTop = editor.scrollTop;
     });
@@ -30,6 +42,11 @@ document.addEventListener('DOMContentLoaded', () => {
         editor.value = editor.value.slice(0, start) + text + editor.value.slice(end);
         editor.selectionStart = editor.selectionEnd = start + text.length;
         updateLineNumbers();
+        if (!syncingCodeFromDiagram) {
+            sourceEditedSinceDiagram = true;
+            diagramEditedSinceCode = false;
+        }
+        scheduleDiagramSync();
     };
 
     editor?.addEventListener('keydown', (e) => {
@@ -59,18 +76,24 @@ document.addEventListener('DOMContentLoaded', () => {
     // Setup View Tabs
     document.querySelectorAll('.view-btn').forEach(btn => {
         btn.addEventListener('click', () => {
+            const targetView = btn.dataset.view;
+            const activeView = document.querySelector('.view-btn.active')?.dataset.view;
+            if (targetView === activeView) return;
+
             document.querySelectorAll('.view-btn').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.view-pane').forEach(p => p.classList.remove('active'));
             btn.classList.add('active');
-            document.getElementById(btn.dataset.view + '-view').classList.add('active');
+            document.getElementById(targetView + '-view').classList.add('active');
             
-            if (btn.dataset.view === 'code') {
-                const hasBlocks = document.querySelectorAll('.flow-block:not(.start)').length > 0;
-                if (hasBlocks) {
-                    generateCodeFromCanvas();
+            if (targetView === 'code') {
+                generateCodeFromCanvas();
+            } else if (targetView === 'visual') {
+                const hasDiagram = Boolean(canvas.querySelector('.diagram-flow'));
+                if (sourceEditedSinceDiagram || !hasDiagram) {
+                    generateCanvasFromCode({ keepPreviousOnError: true });
+                } else {
+                    centerCanvas();
                 }
-            } else if (btn.dataset.view === 'visual') {
-                generateCanvasFromCode();
             }
         });
     });
@@ -90,13 +113,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (zl) zl.textContent = Math.round(zoomLevel * 100) + '%';
     };
 
-    const resizeCanvasToContent = () => {
+    const centerCanvas = () => {
         if (!canvas || !canvasWrapper) return;
-        const blocks = [...canvas.querySelectorAll('.flow-block')];
-        const height = Math.max(canvasWrapper.clientHeight, blocks.length * 150 + 180);
-        const width = Math.max(canvasWrapper.clientWidth, ...blocks.map(b => b.scrollWidth + 180), 760);
-        canvas.style.minHeight = `${height}px`;
-        canvas.style.minWidth = `${width}px`;
+        translateX = (canvasWrapper.clientWidth - 4000) / 2;
+        translateY = 50;
+        updateTransform();
+    };
+
+    const resizeCanvasToContent = () => {
+        // Canvas is now a fixed huge size (4000x4000) to prevent drifting
     };
 
     document.getElementById('zoom-in')?.addEventListener('click', () => { zoomLevel = Math.min(zoomLevel + 0.1, 2); updateTransform(); });
@@ -133,6 +158,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (canvasWrapper) canvasWrapper.style.cursor = 'grab';
     });
 
+    window.addEventListener('resize', () => {
+        if (document.querySelector('.view-btn.active')?.dataset.view === 'visual') centerCanvas();
+    });
+
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            canvas?.querySelectorAll('.diagram-node.selected').forEach(n => n.classList.remove('selected'));
+        }
+    });
+
+    canvas?.addEventListener('click', (e) => {
+        if (e.target === canvas) {
+            canvas.querySelectorAll('.diagram-node.selected').forEach(n => n.classList.remove('selected'));
+        }
+    });
+
     // File buttons Logic
     document.getElementById('btn-load')?.addEventListener('click', () => {
         document.getElementById('file-upload').click();
@@ -160,7 +201,8 @@ document.addEventListener('DOMContentLoaded', () => {
         statusInd.className = 'status-indicator';
         document.getElementById('out-filename').value = '';
         document.getElementById('out-directory').value = '';
-        zoomLevel = 1; translateX = 0; translateY = 0; updateTransform();
+        zoomLevel = 1;
+        centerCanvas();
     });
 
     document.getElementById('btn-save')?.addEventListener('click', (event) => {
@@ -284,13 +326,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function addDraggedBlockTo(target) {
         if (!draggedType) return;
+
+        if ((target !== canvas && target.id !== 'canvas-wrapper') && (draggedType === 'start' || draggedType === 'end')) {
+            draggedType = null;
+            return;
+        }
+
         const emptyMsg = target.querySelector(':scope > .empty-msg, :scope > .zone-empty');
         if (emptyMsg) emptyMsg.remove();
         const block = createBlock(draggedType);
-        target.appendChild(block);
+
+        if (target === canvas || target.id === 'canvas-wrapper') {
+            let flow = canvas.querySelector('.diagram-flow');
+            if (!flow) {
+                flow = document.createElement('div');
+                flow.className = 'diagram-flow';
+                setupDropZone(flow);
+                flow.appendChild(createBlock('start'));
+                canvas.appendChild(flow);
+            }
+            if (draggedType === 'start' && flow.querySelector(':scope > .flow-block.start')) {
+                draggedType = null;
+                return;
+            }
+            if (draggedType === 'end' && flow.querySelector(':scope > .flow-block.end')) {
+                draggedType = null;
+                return;
+            }
+            const endNode = [...flow.children].find(b => b.dataset.type === 'end');
+            if (endNode) {
+                flow.insertBefore(block, endNode);
+            } else {
+                flow.appendChild(block);
+            }
+        } else {
+            target.appendChild(block);
+        }
+
         draggedType = null;
         resizeCanvasToContent();
+        diagramEditedSinceCode = true;
         generateCodeFromCanvas();
+        centerCanvas();
     }
 
     function setupDropZone(zone) {
@@ -311,123 +388,136 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function createBlock(type) {
+    function createBlock(type, data = {}) {
         const block = document.createElement('div');
         block.className = `flow-block ${type}`;
         block.dataset.type = type;
 
-        let title = '';
         let bodyHTML = '';
 
         switch(type) {
             case 'start':
-                title = 'Inicio / Fin';
-                bodyHTML = `<div style="text-align:center;font-size:0.8rem;opacity:0.7">Contenedor Principal</div>`;
+                bodyHTML = `
+                    <div class="diagram-item start-node">
+                        <div class="diagram-node terminator start-node">Inicio</div>
+                    </div>`;
                 break;
             case 'assign':
-                title = 'Asignar';
                 bodyHTML = `
-                    <div class="block-body">
-                        <select class="block-input short" name="tipo">
-                            <option value="int">int</option>
-                            <option value="float">float</option>
-                            <option value="char">char</option>
-                            <option value="">(none)</option>
-                        </select>
-                        <input type="text" class="block-input short" placeholder="A" name="var">
-                        &lt;-
-                        <input type="text" class="block-input" placeholder="B+i" name="exp">
+                    <div class="diagram-item">
+                        <button class="delete-btn" title="Eliminar">✖</button>
+                        <div class="diagram-node process">
+                            <select class="block-input short" name="tipo">
+                                <option value="int">int</option>
+                                <option value="float">float</option>
+                                <option value="char">char</option>
+                                <option value="">(none)</option>
+                            </select>
+                            <input type="text" class="block-input short" placeholder="var" name="var">
+                            =
+                            <input type="text" class="block-input" placeholder="exp" name="exp">
+                        </div>
                     </div>`;
                 break;
             case 'if':
-                title = 'if';
                 bodyHTML = `
-                    <div class="structured-flow if-flow">
-                        <div class="decision-node">
-                            <input type="text" class="block-input decision-input" placeholder="condicion" name="cond">
+                    <div class="diagram-item diagram-branch">
+                        <button class="delete-btn" title="Eliminar">✖</button>
+                        <div class="diagram-node decision">
+                            <input type="text" class="block-input decision-input" placeholder="x > 5" name="cond">
                         </div>
-                        <div class="branch-row">
-                            <div class="branch-panel true-panel">
-                                <div class="branch-title">Verdadero</div>
-                                <div class="nested-zone" data-zone="true"><div class="zone-empty">Arrastra aqui bloque de instruccion</div></div>
+                        <div class="branch-labels"><span class="yes">Si</span><span class="no">No</span></div>
+                        <div class="diagram-branches">
+                            <div class="diagram-branch-column yes-column nested-zone" data-zone="true">
+                                <div class="zone-empty">Arrastra...</div>
                             </div>
-                            <div class="branch-panel false-panel">
-                                <div class="branch-title">Falso</div>
-                                <div class="nested-zone" data-zone="false"><div class="zone-empty">Arrastra aqui bloque de instruccion</div></div>
+                            <div class="diagram-branch-column no-column nested-zone" data-zone="false">
+                                <div class="zone-empty">Arrastra...</div>
                             </div>
                         </div>
-                        <div class="merge-node"></div>
+                        <div class="merge-dot"></div>
                     </div>`;
                 break;
             case 'while':
-                title = 'while';
                 bodyHTML = `
-                    <div class="structured-flow loop-flow while-flow">
-                        <div class="decision-node">
-                            <input type="text" class="block-input decision-input" placeholder="contador <= 5" name="cond">
+                    <div class="diagram-item diagram-loop while-diagram">
+                        <button class="delete-btn" title="Eliminar">✖</button>
+                        <div class="diagram-node decision">
+                            <input type="text" class="block-input decision-input" placeholder="x < 10" name="cond">
                         </div>
-                        <div class="loop-label true">Verdadero</div>
-                        <div class="loop-label false">Falso</div>
-                        <div class="nested-zone loop-body" data-zone="body"><div class="zone-empty">Arrastra aqui bloque de instruccion</div></div>
-                        <div class="loop-return"></div>
-                        <div class="loop-exit"></div>
+                        <div class="loop-labels"><span class="yes">Verdadero</span><span class="no">Falso</span></div>
+                        <div class="diagram-loop-body nested-zone" data-zone="body">
+                            <div class="zone-empty">Arrastra...</div>
+                        </div>
+                        <div class="return-path"></div>
                     </div>`;
                 break;
             case 'for':
-                title = 'for';
                 bodyHTML = `
-                    <div class="structured-flow loop-flow for-flow">
-                        <div class="for-config">
-                            <input type="text" class="block-input" placeholder="int i = 0" name="init">
-                        </div>
-                        <div class="decision-node">
-                            <input type="text" class="block-input decision-input" placeholder="i <= 10" name="cond">
-                        </div>
-                        <div class="loop-label true">Verdadero</div>
-                        <div class="loop-label false">Falso</div>
-                        <div class="nested-zone loop-body" data-zone="body"><div class="zone-empty">Arrastra aqui bloque de instruccion</div></div>
-                        <div class="for-increment">
+                    <div class="diagram-item diagram-loop for-diagram">
+                        <button class="delete-btn" title="Eliminar">✖</button>
+                        <div class="diagram-node for-control">
+                            <input type="text" class="block-input" placeholder="int i=0" name="init">
+                            <input type="text" class="block-input decision-input" placeholder="i<10" name="cond">
                             <input type="text" class="block-input" placeholder="i++" name="inc">
                         </div>
-                        <div class="loop-return"></div>
-                        <div class="loop-exit"></div>
+                        <div class="loop-labels"><span class="yes">Verdadero</span><span class="no">Falso</span></div>
+                        <div class="diagram-loop-body nested-zone" data-zone="body">
+                            <div class="zone-empty">Arrastra...</div>
+                        </div>
+                        <div class="loop-connector">○</div>
+                        <div class="return-path"></div>
                     </div>`;
                 break;
             case 'print':
-                title = 'print';
                 bodyHTML = `
-                    <div class="block-body">
-                        <input type="text" class="block-input" placeholder="'Hola !'" name="val">
+                    <div class="diagram-item">
+                        <button class="delete-btn" title="Eliminar">✖</button>
+                        <div class="diagram-node output">
+                            Imprimir: <input type="text" class="block-input" placeholder='"Hola!"' name="val">
+                        </div>
                     </div>`;
                 break;
-            case 'else':
-                title = 'Si No (Else)';
-                bodyHTML = `<div style="text-align:center;font-size:0.8rem;opacity:0.7">Rama Falsa</div>`;
-                break;
             case 'end':
-                title = 'Fin Bloque';
-                bodyHTML = `<div style="text-align:center;font-size:0.8rem;opacity:0.7">Cierra if/while/for anterior</div>`;
+                bodyHTML = `
+                    <div class="diagram-item terminal">
+                        <div class="diagram-node terminator end-node">Fin</div>
+                    </div>`;
                 break;
         }
 
-        block.innerHTML = `
-            <div class="shape-bg"></div>
-            <div class="block-content">
-                <div class="block-header">
-                    ${title} <button class="delete-btn">✖</button>
-                </div>
-                ${bodyHTML}
-            </div>
-        `;
+        block.innerHTML = bodyHTML;
 
-        block.querySelector('.delete-btn').addEventListener('click', () => {
-            block.remove();
-            resizeCanvasToContent();
-            generateCodeFromCanvas();
+        const noTypeOption = block.querySelector('select[name="tipo"] option[value=""]');
+        if (noTypeOption) noTypeOption.textContent = 'sin tipo';
+
+        // Safely set data values
+        if (data.tipo !== undefined) {
+            const sel = block.querySelector('[name="tipo"]');
+            if (sel) sel.value = data.tipo;
+        }
+        ['var', 'exp', 'cond', 'init', 'inc', 'val'].forEach(fieldName => {
+            if (data[fieldName] !== undefined) {
+                const input = block.querySelector(`[name="${fieldName}"]`);
+                if (input) input.value = data[fieldName];
+            }
         });
 
+        const delBtn = block.querySelector('.delete-btn');
+        if (delBtn) {
+            delBtn.addEventListener('click', () => {
+                block.remove();
+                resizeCanvasToContent();
+                diagramEditedSinceCode = true;
+                generateCodeFromCanvas();
+            });
+        }
+
         block.querySelectorAll('input, select').forEach(input => {
-            input.addEventListener('input', generateCodeFromCanvas);
+            input.addEventListener('input', () => {
+                diagramEditedSinceCode = true;
+                generateCodeFromCanvas();
+            });
         });
 
         block.querySelectorAll('.nested-zone').forEach(setupDropZone);
@@ -436,11 +526,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function generateCodeFromCanvas() {
+        const flow = canvas.querySelector('.diagram-flow') || canvas;
         let code = '#include <stdio.h>\nint main() {\n';
-        code += blocksToCode(canvas, '    ');
+        code += blocksToCode(flow, '    ');
         code += '    return 0;\n}';
+        syncingCodeFromDiagram = true;
         editor.value = code;
         updateLineNumbers();
+        syncingCodeFromDiagram = false;
+        sourceEditedSinceDiagram = false;
+        diagramEditedSinceCode = false;
     }
 
     function directBlocks(container) {
@@ -448,6 +543,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function blocksToCode(container, indent) {
+        if (!container) return '';
         let code = '';
         directBlocks(container).forEach(block => {
             const type = block.dataset.type;
@@ -457,13 +553,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (type === 'assign') {
-                const tipo = block.querySelector('[name="tipo"]').value;
-                const v = block.querySelector('[name="var"]').value || 'temp';
-                const exp = block.querySelector('[name="exp"]').value || '0';
-                code += `${indent}${tipo ? tipo + ' ' : ''}${v} = ${exp};\n`;
+                const tipo = block.querySelector('[name="tipo"]')?.value || '';
+                const v = block.querySelector('[name="var"]')?.value || 'temp';
+                const exp = block.querySelector('[name="exp"]')?.value || '';
+                if (exp) {
+                    code += `${indent}${tipo ? tipo + ' ' : ''}${v} = ${exp};\n`;
+                } else {
+                    code += `${indent}${tipo ? tipo + ' ' : ''}${v};\n`;
+                }
             }
             else if (type === 'print') {
-                const val = block.querySelector('[name="val"]').value || '""';
+                const val = normalizePrintValue(block.querySelector('[name="val"]').value || '""');
                 code += `${indent}println(${val});\n`;
             }
             else if (type === 'if') {
@@ -495,111 +595,467 @@ document.addEventListener('DOMContentLoaded', () => {
         return code;
     }
 
-    function generateCanvasFromCode() {
-        const code = editor.value;
-        const mainMatch = code.match(/int\s+main\s*\(\)\s*\{([\s\S]*?)return\s+0;/);
-        if (!mainMatch) return;
-        
-        let body = mainMatch[1];
-        
-        canvas.innerHTML = '';
-        canvas.appendChild(createBlock('start'));
+    function normalizePrintValue(value) {
+        const raw = String(value || '').trim();
+        if (!raw) return '""';
 
-        const lines = body.split('\n').map(l => l.trim()).filter(l => l);
-        const stack = [{ container: canvas, type: 'root' }];
+        const singleQuoted = raw.match(/^'([\s\S]*)'$/);
+        if (singleQuoted) {
+            return `"${singleQuoted[1].replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+        }
 
-        const currentContainer = () => stack[stack.length - 1].container;
-        const appendBlock = (block, container = currentContainer()) => {
-            const empty = container.querySelector(':scope > .zone-empty, :scope > .empty-msg');
-            if (empty) empty.remove();
-            container.appendChild(block);
+        if (/^"[\s\S]*"$/.test(raw)) return raw;
+        if (/^[a-zA-Z_]\w*$/.test(raw)) return raw;
+        if (/^[a-zA-Z_]\w*\s*\([^)]*\)$/.test(raw)) return raw;
+        if (/^-?\d+(?:\.\d+)?$/.test(raw)) return raw;
+
+        return `"${raw.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+    }
+
+    function scheduleDiagramSync() {
+        clearTimeout(diagramTimer);
+        diagramTimer = setTimeout(() => {
+            const activeView = document.querySelector('.view-btn.active')?.dataset.view;
+            if (activeView === 'visual') generateCanvasFromCode({ keepPreviousOnError: true });
+        }, 800);
+    }
+
+    function stripComments(code) {
+        return code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    }
+
+    function extractMainBody(code) {
+        const clean = stripComments(code);
+        const match = clean.match(/int\s+main\s*\([^)]*\)\s*\{/);
+        if (!match) return '';
+        let depth = 1;
+        let inString = false;
+        let quote = '';
+        let start = match.index + match[0].length;
+        for (let i = start; i < clean.length; i++) {
+            const ch = clean[i];
+            const prev = clean[i - 1];
+            if ((ch === '"' || ch === "'") && prev !== '\\') {
+                if (!inString) { inString = true; quote = ch; }
+                else if (quote === ch) { inString = false; }
+            }
+            if (inString) continue;
+            if (ch === '{') depth++;
+            if (ch === '}') depth--;
+            if (depth === 0) return clean.slice(start, i);
+        }
+        return '';
+    }
+
+    function tokenizeStatements(body, codeBeforeMain = '') {
+        const tokens = [];
+        let current = '';
+        let startLine = codeBeforeMain.split('\n').length;
+        let line = startLine;
+        let tokenLine = line;
+        let inString = false;
+        let quote = '';
+
+        const push = () => {
+            const text = current.trim();
+            if (text) tokens.push({ text, line: tokenLine });
+            current = '';
+            tokenLine = line;
         };
-        
-        for (let i = 0; i < lines.length; i++) {
-            let line = lines[i];
 
-            if (line.startsWith('} else')) {
-                const current = stack[stack.length - 1];
-                if (current?.type === 'if') {
-                    current.container = current.block.querySelector('[data-zone="false"]');
-                    stack[stack.length - 1] = current;
+        for (let i = 0; i < body.length; i++) {
+            const ch = body[i];
+            const prev = body[i - 1];
+            if (!current.trim()) tokenLine = line;
+            if ((ch === '"' || ch === "'") && prev !== '\\') {
+                if (!inString) { inString = true; quote = ch; }
+                else if (quote === ch) { inString = false; }
+            }
+            current += ch;
+            if (!inString && (ch === ';' || ch === '{' || ch === '}')) push();
+            if (ch === '\n') line++;
+        }
+        push();
+        return tokens.filter(t => t.text !== ';');
+    }
+
+    function parseDiagram(code) {
+        const mainHeader = stripComments(code).match(/int\s+main\s*\([^)]*\)\s*\{/);
+        const body = extractMainBody(code);
+        if (!mainHeader || !body.trim()) return [];
+        const tokens = tokenizeStatements(body, code.slice(0, mainHeader.index + mainHeader[0].length));
+        const parsed = parseBlock(tokens, 0);
+        return parsed.nodes;
+    }
+
+    function parseBlock(tokens, index) {
+        const nodes = [];
+        while (index < tokens.length) {
+            let token = tokens[index];
+            let text = token.text.trim();
+            if (text === '}') return { nodes, index: index + 1 };
+            if (/^else\b/.test(text)) return { nodes, index };
+
+            if (/^if\s*\(/.test(text)) {
+                const cond = (text.match(/^if\s*\(([\s\S]*)\)\s*\{$/) || [])[1] || '';
+                const trueBlock = parseBlock(tokens, index + 1);
+                index = trueBlock.index;
+                let falseNodes = [];
+                if (tokens[index] && /^else\b/.test(tokens[index].text.trim())) {
+                    const falseBlock = parseBlock(tokens, index + 1);
+                    falseNodes = falseBlock.nodes;
+                    index = falseBlock.index;
                 }
+                nodes.push({ kind: 'if', cond: cond.trim(), yes: trueBlock.nodes, no: falseNodes, line: token.line, source: text });
                 continue;
             }
 
-            if (line === '}' || line === '') {
-                if (stack.length > 1) stack.pop();
+            if (/^while\s*\(/.test(text)) {
+                const cond = (text.match(/^while\s*\(([\s\S]*)\)\s*\{$/) || [])[1] || '';
+                const bodyBlock = parseBlock(tokens, index + 1);
+                nodes.push({ kind: 'while', cond: cond.trim(), body: bodyBlock.nodes, line: token.line, source: text });
+                index = bodyBlock.index;
                 continue;
             }
-            
-            if (line.startsWith('if')) {
-                const match = line.match(/if\s*\((.*?)\)/);
-                if (match) {
-                    const block = createBlock('if');
-                    block.querySelector('[name="cond"]').value = match[1];
-                    appendBlock(block);
-                    stack.push({ type: 'if', block, container: block.querySelector('[data-zone="true"]') });
-                }
-            } else if (line.startsWith('while')) {
-                const match = line.match(/while\s*\((.*?)\)/);
-                if (match) {
-                    const block = createBlock('while');
-                    block.querySelector('[name="cond"]').value = match[1];
-                    appendBlock(block);
-                    stack.push({ type: 'while', block, container: block.querySelector('[data-zone="body"]') });
-                }
-            } else if (line.startsWith('for')) {
-                const match = line.match(/for\s*\((.*?);(.*?);(.*?)\)/);
-                if (match) {
-                    const block = createBlock('for');
-                    block.querySelector('[name="init"]').value = match[1].trim();
-                    block.querySelector('[name="cond"]').value = match[2].trim();
-                    block.querySelector('[name="inc"]').value = match[3].trim();
-                    appendBlock(block);
-                    stack.push({ type: 'for', block, container: block.querySelector('[data-zone="body"]') });
-                }
-            } else if (line.startsWith('println') || line.startsWith('print') || line.startsWith('printf')) {
-                const match = line.match(/(println|print|printf)\s*\((.*?)\)/);
-                if (match) {
-                    const block = createBlock('print');
-                    block.querySelector('[name="val"]').value = match[2];
-                    appendBlock(block);
-                }
+
+            if (/^for\s*\(/.test(text)) {
+                const parts = ((text.match(/^for\s*\(([\s\S]*)\)\s*\{$/) || [])[1] || '').split(';').map(p => p.trim());
+                const bodyBlock = parseBlock(tokens, index + 1);
+                nodes.push({ kind: 'for', init: parts[0] || '', cond: parts[1] || '', inc: parts[2] || '', body: bodyBlock.nodes, line: token.line, source: text });
+                index = bodyBlock.index;
+                continue;
+            }
+
+            if (/^return\b/.test(text)) {
+                nodes.push({ kind: 'end', text: 'Fin', line: token.line, source: text });
+                index++;
+                continue;
+            }
+
+            const node = statementToNode(text, token.line);
+            if (Array.isArray(node)) nodes.push(...node);
+            else if (node) nodes.push(node);
+            index++;
+        }
+        return { nodes, index };
+    }
+
+    function splitTopLevelCommas(text) {
+        const parts = [];
+        let current = '';
+        let depth = 0;
+        let inString = false;
+        let quote = '';
+        for (let i = 0; i < text.length; i++) {
+            const ch = text[i];
+            const prev = text[i - 1];
+            if ((ch === '"' || ch === "'") && prev !== '\\') {
+                if (!inString) { inString = true; quote = ch; }
+                else if (quote === ch) { inString = false; }
+            }
+            if (!inString && ch === '(') depth++;
+            if (!inString && ch === ')') depth--;
+            if (!inString && ch === ',' && depth === 0) {
+                parts.push(current.trim());
+                current = '';
+                continue;
+            }
+            current += ch;
+        }
+        if (current.trim()) parts.push(current.trim());
+        return parts;
+    }
+
+    function normalizeAssignment(text) {
+        const clean = text.replace(/;$/, '').trim();
+        const declaration = clean.match(/^(int|float|char)\s+(.+)$/);
+        const declaredType = declaration ? declaration[1] : '';
+        const rest = declaration ? declaration[2] : clean;
+        return splitTopLevelCommas(rest).map(part => {
+            const m = part.match(/^([a-zA-Z_]\w*)\s*=\s*(.+)$/);
+            if (m) return `${declaredType ? declaredType + ' ' : ''}${m[1]} = ${m[2].trim()}`;
+            const name = part.replace(/\[\]/g, '').trim();
+            return declaredType ? `${declaredType} ${name}` : `${name} = ?`;
+        });
+    }
+
+    function formatOutput(text) {
+        const args = (text.match(/^(?:printf|println|print|puts)\s*\(([\s\S]*)\)\s*;?$/) || [])[1] || text;
+        const parts = splitTopLevelCommas(args);
+        const first = parts[0] || '';
+        if (/^"/.test(first) && parts.length > 1) {
+            const literal = first.replace(/^"|"$/g, '').replace(/\\n/g, '').replace(/%[dfs]/g, '').trim();
+            return `Imprimir: "${literal}" + ${parts.slice(1).join(' + ')}`;
+        }
+        return `Imprimir: ${first.replace(/\\n/g, '')}`;
+    }
+
+    function statementToNode(text, line) {
+        if (/^(?:printf|println|print|puts)\s*\(/.test(text)) {
+            return { kind: 'output', text: formatOutput(text), line, source: text };
+        }
+        const callAssign = text.match(/^(?:(?:int|float|char)\s+)?([a-zA-Z_]\w*)\s*=\s*([a-zA-Z_]\w*\s*\([^;]*\))\s*;$/);
+        if (callAssign) {
+            return [
+                { kind: 'subprocess', text: callAssign[2], line, source: text },
+                { kind: 'process', lines: [`${callAssign[1]} = resultado`], line, source: text }
+            ];
+        }
+        const assignMatch = text.match(/^(?:(?:int|float|char)\s+)?[a-zA-Z_]\w*(?:\[\])?\s*(?:=|\+=|-=|\*=|\/=).+;$/);
+        const declarationMatch = text.match(/^(int|float|char)\s+.+;$/);
+        if (assignMatch || declarationMatch || /^[a-zA-Z_]\w*(?:\+\+|--);$/.test(text)) {
+            return { kind: 'process', lines: /^[a-zA-Z_]\w*(?:\+\+|--);$/.test(text) ? [text.replace(/;$/, '')] : normalizeAssignment(text), line, source: text };
+        }
+        const call = text.match(/^([a-zA-Z_]\w*)\s*\((.*)\)\s*;$/);
+        if (call) return { kind: 'subprocess', text: `${call[1]}(${call[2]})`, line, source: text };
+        return null;
+    }
+
+    function compactProcessNodes(nodes) {
+        const compact = [];
+        for (const node of nodes) {
+            if (node.kind === 'process' && compact[compact.length - 1]?.kind === 'process') {
+                compact[compact.length - 1].lines.push(...node.lines);
+                compact[compact.length - 1].source += `\n${node.source}`;
             } else {
-                const declarationMatch = line.match(/^(int|float|char)\s+([a-zA-Z_]\w*)\s*;$/);
-                if (declarationMatch) {
-                    const block = createBlock('assign');
-                    block.querySelector('[name="tipo"]').value = declarationMatch[1];
-                    block.querySelector('[name="var"]').value = declarationMatch[2];
-                    block.querySelector('[name="exp"]').value = declarationMatch[1] === 'float' ? '0.0' : (declarationMatch[1] === 'char' ? "'A'" : '0');
-                    appendBlock(block);
-                    continue;
-                }
-                const assignMatch = line.match(/^(?:(int|float|char)\s+)?([a-zA-Z_]\w*)\s*=\s*(.*?);$/);
-                if (assignMatch) {
-                    const block = createBlock('assign');
-                    if (assignMatch[1]) block.querySelector('[name="tipo"]').value = assignMatch[1];
-                    else block.querySelector('[name="tipo"]').value = '';
-                    block.querySelector('[name="var"]').value = assignMatch[2];
-                    block.querySelector('[name="exp"]').value = assignMatch[3];
-                    appendBlock(block);
-                }
+                compact.push(node);
             }
         }
-        canvas.appendChild(createBlock('end'));
-        resizeCanvasToContent();
+        return compact;
+    }
+
+    function createDiagramNode(kind, content, meta = {}) {
+        const node = document.createElement('div');
+        node.className = `diagram-node ${kind}`;
+        node.dataset.line = meta.line || '';
+        node.dataset.label = Array.isArray(content) ? content.join('\n') : (content || '');
+        node.title = meta.source ? `Linea ${meta.line}: ${meta.source}` : '';
+        node.innerHTML = Array.isArray(content)
+            ? content.map(line => `<div>${escapeHtml(line)}</div>`).join('')
+            : escapeHtml(content || '');
+        node.addEventListener('click', (event) => {
+            event.stopPropagation();
+            selectDiagramNode(node);
+            if (meta.line) goToEditorLine(meta.line);
+        });
+        return node;
+    }
+
+    function escapeHtml(text) {
+        return String(text).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
+
+    function createStaticBlock(kind, content, meta = {}) {
+        const block = document.createElement('div');
+        block.className = `flow-block static-block ${kind}`;
+        block.dataset.type = 'static';
+
+        const item = document.createElement('div');
+        item.className = 'diagram-item';
+        item.appendChild(createDiagramNode(kind, content, meta));
+        block.appendChild(item);
+        return block;
+    }
+
+    function appendPassNode(container, text = 'Sin instrucciones') {
+        container.appendChild(createStaticBlock('pass', text));
+    }
+
+    function renderStaticSequence(nodes, container) {
+        nodes.forEach(node => {
+            if (node.kind === 'if') {
+                const block = document.createElement('div');
+                block.className = 'flow-block static-block if';
+                block.dataset.type = 'static';
+                block.innerHTML = `
+                    <div class="diagram-item diagram-branch static-branch">
+                        <div class="branch-labels"><span class="yes">Si</span><span class="no">No</span></div>
+                        <div class="diagram-branches">
+                            <div class="diagram-branch-column yes-column static-zone" data-zone="true"></div>
+                            <div class="diagram-branch-column no-column static-zone" data-zone="false"></div>
+                        </div>
+                        <div class="merge-dot"></div>
+                    </div>`;
+                block.querySelector('.diagram-branch').insertBefore(
+                    createDiagramNode('decision', node.cond || 'condicion', node),
+                    block.querySelector('.branch-labels')
+                );
+                const yesZone = block.querySelector('[data-zone="true"]');
+                const noZone = block.querySelector('[data-zone="false"]');
+                node.yes?.length ? renderStaticSequence(node.yes, yesZone) : appendPassNode(yesZone);
+                node.no?.length ? renderStaticSequence(node.no, noZone) : appendPassNode(noZone);
+                container.appendChild(block);
+                return;
+            }
+
+            if (node.kind === 'while') {
+                const block = document.createElement('div');
+                block.className = 'flow-block static-block while';
+                block.dataset.type = 'static';
+                block.innerHTML = `
+                    <div class="diagram-item diagram-loop while-diagram static-loop">
+                        <div class="loop-labels"><span class="yes">Verdadero</span><span class="no">Falso</span></div>
+                        <div class="diagram-loop-body static-zone" data-zone="body"></div>
+                        <div class="return-path"></div>
+                    </div>`;
+                block.querySelector('.diagram-loop').insertBefore(
+                    createDiagramNode('decision', node.cond || 'condicion', node),
+                    block.querySelector('.loop-labels')
+                );
+                const bodyZone = block.querySelector('[data-zone="body"]');
+                node.body?.length ? renderStaticSequence(node.body, bodyZone) : appendPassNode(bodyZone);
+                container.appendChild(block);
+                return;
+            }
+
+            if (node.kind === 'for') {
+                const lines = [
+                    `Inicio: ${node.init || '-'}`,
+                    `Condicion: ${node.cond || '-'}`,
+                    `Paso: ${node.inc || '-'}`
+                ];
+                const block = document.createElement('div');
+                block.className = 'flow-block static-block for';
+                block.dataset.type = 'static';
+                block.innerHTML = `
+                    <div class="diagram-item diagram-loop for-diagram static-loop">
+                        <div class="loop-labels"><span class="yes">Verdadero</span><span class="no">Falso</span></div>
+                        <div class="diagram-loop-body static-zone" data-zone="body"></div>
+                        <div class="loop-connector"></div>
+                        <div class="return-path"></div>
+                    </div>`;
+                block.querySelector('.diagram-loop').insertBefore(
+                    createDiagramNode('for-control', lines, node),
+                    block.querySelector('.loop-labels')
+                );
+                const bodyZone = block.querySelector('[data-zone="body"]');
+                node.body?.length ? renderStaticSequence(node.body, bodyZone) : appendPassNode(bodyZone);
+                container.appendChild(block);
+                return;
+            }
+
+            if (node.kind === 'process') {
+                container.appendChild(createStaticBlock('process', node.lines, node));
+                return;
+            }
+
+            if (node.kind === 'output') {
+                container.appendChild(createStaticBlock('output', node.text, node));
+                return;
+            }
+
+            if (node.kind === 'subprocess') {
+                container.appendChild(createStaticBlock('subprocess', node.text, node));
+            }
+        });
+    }
+
+    function renderSequence(nodes, container) {
+        nodes.forEach(node => {
+            let block;
+            if (node.kind === 'if') {
+                block = createBlock('if', { cond: node.cond });
+                renderSequence(node.yes, block.querySelector('[data-zone="true"]'));
+                renderSequence(node.no, block.querySelector('[data-zone="false"]'));
+            } else if (node.kind === 'while') {
+                block = createBlock('while', { cond: node.cond });
+                renderSequence(node.body, block.querySelector('[data-zone="body"]'));
+            } else if (node.kind === 'for') {
+                block = createBlock('for', { init: node.init, cond: node.cond, inc: node.inc });
+                renderSequence(node.body, block.querySelector('[data-zone="body"]'));
+            } else if (node.kind === 'process') {
+                node.lines.forEach(line => {
+                    const m = line.match(/^(?:(int|float|char)\s+)?([a-zA-Z_]\w*)\s*=\s*(.+)$/);
+                    if (m) {
+                        const b = createBlock('assign', { tipo: m[1] || '', var: m[2], exp: m[3] });
+                        container.appendChild(b);
+                    } else {
+                        // try to parse declaration
+                        const m2 = line.match(/^(int|float|char)\s+([a-zA-Z_]\w*)$/);
+                        if(m2) {
+                            const b = createBlock('assign', { tipo: m2[1], var: m2[2], exp: '' });
+                            container.appendChild(b);
+                        } else {
+                            const b = createBlock('assign', { tipo: '', var: line, exp: '' });
+                            container.appendChild(b);
+                        }
+                    }
+                });
+                return;
+            } else if (node.kind === 'output') {
+                const val = node.text.replace(/^Imprimir:\s*/, '');
+                block = createBlock('print', { val });
+            } else if (node.kind === 'subprocess') {
+                block = createBlock('assign', { tipo: '', var: '', exp: node.text });
+            } else if (node.kind === 'end') {
+                return;
+            }
+            if (block) {
+                block.querySelectorAll('.nested-zone').forEach(z => {
+                    if (z.querySelector('.flow-block')) z.querySelector('.zone-empty')?.remove();
+                });
+                container.appendChild(block);
+            }
+        });
+
+        if (container.querySelector('.flow-block')) {
+            container.querySelector(':scope > .zone-empty')?.remove();
+        }
+    }
+
+    function selectDiagramNode(node) {
+        canvas.querySelectorAll('.diagram-node.selected').forEach(n => n.classList.remove('selected'));
+        node.classList.add('selected');
+    }
+
+    function goToEditorLine(line) {
+        const lines = editor.value.split('\n');
+        const target = Math.max(1, Math.min(Number(line), lines.length));
+        const start = lines.slice(0, target - 1).join('\n').length + (target > 1 ? 1 : 0);
+        const end = start + lines[target - 1].length;
+        editor.focus();
+        editor.setSelectionRange(start, end);
+    }
+
+    function generateCanvasFromCode(options = {}) {
+        try {
+            canvas.classList.add('diagram-loading');
+            const nodes = parseDiagram(editor.value);
+            const flow = document.createElement('div');
+            flow.className = 'diagram-flow';
+            setupDropZone(flow);
+
+            flow.appendChild(createBlock('start'));
+            if (nodes.length) renderSequence(nodes, flow);
+            flow.appendChild(createBlock('end'));
+
+            canvas.innerHTML = '';
+            canvas.appendChild(flow);
+            lastValidDiagram = flow.cloneNode(true);
+            sourceEditedSinceDiagram = false;
+            diagramEditedSinceCode = false;
+            resizeCanvasToContent();
+            centerCanvas();
+        } catch (error) {
+            console.error(error);
+            if (!options.keepPreviousOnError || !lastValidDiagram) {
+                canvas.innerHTML = '<div class="empty-msg error-msg">No se pudo generar el diagrama. Revisa la sintaxis del codigo.</div>';
+            }
+        } finally {
+            setTimeout(() => canvas.classList.remove('diagram-loading'), 180);
+        }
     }
 
     resizeCanvasToContent();
     updateLineNumbers();
+    centerCanvas();
+    generateCanvasFromCode();
 
     // Compile action
     compileBtn.addEventListener('click', async () => {
         const activeView = document.querySelector('.view-btn.active').dataset.view;
-        const hasBlocks = document.querySelectorAll('.flow-block:not(.start)').length > 0;
-        
-        if (activeView === 'visual' && hasBlocks) {
-            generateCodeFromCanvas(); // Solo sincronizar si estamos armando bloques
+        if (activeView === 'visual') {
+            generateCodeFromCanvas();
         }
         
         const code = editor.value;
